@@ -700,12 +700,29 @@ document.addEventListener('DOMContentLoaded', function () {
             },
             body: JSON.stringify(payload)
         })
-        .then(res => res.json())
+                .then(res => res.json())
         .then(data => {
             btnAbrirOpciones.disabled = false;
             btnAbrirOpciones.innerHTML = '<i class="fas fa-check-circle me-2"></i> Procesar Operación';
 
-            if (data.status === 'success') {
+            // 1. Errores reales (validaciones, falta de stock, etc.) -> Cortar flujo
+            if (data.status === 'error') {
+                alert('❌ ' + (data.message || 'Ocurrió un problema en el servidor.'));
+                return;
+            }
+
+            // 2. Si es WARNING (ARCA rechazó el CAE pero la venta se guardó)
+            // Mostramos el cartel avisando, pero NO cortamos el flujo.
+            if (data.status === 'warning' || data.error_arca) {
+                alert(
+                    '⚠️ LA VENTA SE GUARDÓ, PERO ARCA RECHAZÓ EL CAE\n\n' +
+                    'Motivo: ' + (data.error_arca || data.message) + '\n\n' +
+                    'El comprobante se emitirá como DOCUMENTO X (NO FISCAL).'
+                );
+            }
+
+            // 3. Flujo exitoso o warning -> Abrir modal y limpiar carrito
+            if (data.status === 'success' || data.status === 'warning') {
                 localStorage.removeItem('pos_backup');
                 carrito = [];
                 renderizarCarrito();
@@ -722,6 +739,16 @@ document.addEventListener('DOMContentLoaded', function () {
                 modalEstadoDisplay.textContent = `Estado: ${data.estado_display}` + (data.repartidor ? ` | Repartidor: ${data.repartidor}` : '');
                 emailInput.value = data.cliente_email || '';
 
+                // 🔽 CAMBIAR EL COLOR DEL MODAL SEGÚN SI HAY CAE O NO
+                const headerModal = overlayPostVenta.querySelector('.card-header');
+                if (data.cae) {
+                    headerModal.className = 'card-header bg-success text-white py-3 text-center border-0';
+                    headerModal.innerHTML = '<h4 class="mb-0 fw-bold"><i class="fas fa-check-circle me-2"></i> ¡Operación Registrada!</h4>';
+                } else {
+                    headerModal.className = 'card-header bg-warning text-dark py-3 text-center border-0';
+                    headerModal.innerHTML = '<h4 class="mb-0 fw-bold"><i class="fas fa-exclamation-triangle me-2"></i> Comprobante NO FISCAL (Sin CAE)</h4>';
+                }
+
                 // Detectar servicio de impresión
                 detectarServicioImpresion().then(disponible => {
                     if (disponible) {
@@ -737,9 +764,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     }
                 });
 
+                // Mostrar el modal de post-venta
                 overlayPostVenta.style.display = 'flex';
-            } else {
-                alert('Error al procesar: ' + (data.message || 'Ocurrió un problema en el servidor.'));
             }
         })
         .catch(err => {

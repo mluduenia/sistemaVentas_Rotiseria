@@ -588,7 +588,13 @@ def procesar_venta_ajax(request):
                            'A Consumidor Final solo se le puede vender al contado.'
             }, status=400)
 
+        
+                # ============================================================
         # 8. Crear Registro de Venta
+        # La venta arranca como NO FISCAL (Documento X) hasta que
+        # ARCA confirme el CAE. Solo se promueve a Factura C si ARCA
+        # autoriza. Si ARCA rechaza, queda como Documento X.
+        # ============================================================
         if es_remito:
             saldo_pendiente = total_venta
 
@@ -602,15 +608,32 @@ def procesar_venta_ajax(request):
             estado_cobro_val = 'PENDIENTE'
         else:
             estado_cobro_val = 'PENDIENTE' if es_remito else 'COBRADO'
-        
+
         # 🔽 NUEVO: Consumidor Final anónimo siempre se cobra al instante
         if not cliente_obj:
             estado_cobro_val = 'COBRADO'
             saldo_pendiente = Decimal('0.00')
 
+        # ============================================================
+        # Tipo fiscal tentativo: solo se aplica si ARCA autoriza el CAE.
+        # La venta arranca como Documento X (tipo 0) para no emitir
+        # una Factura C sin CAE si ARCA rechaza.
+        # ============================================================
+        tipo_fiscal_tentativo = tipo_comprobante_final
+
+        if accion_comprobante in ['TICKET', 'FACTURA']:
+            tipo_comprobante_inicial = 0          # Documento X (no fiscal)
+            estado_inicial = 'PENDIENTE_CAE'
+        else:
+            tipo_comprobante_inicial = tipo_comprobante_final
+            estado_inicial = estado_venta
+
+        # Flag para saber si ARCA rechazó (se completa en el paso 10)
+        error_arca = None
+
         venta = Venta.objects.create(
             turno=turno_activo,
-            sucursal=turno_activo.sucursal,   # 🔽 NUEVO
+            sucursal=turno_activo.sucursal,
             vendedor=vendedor_obj,
             repartidor=repartidor_obj,
             cliente=cliente_obj,
@@ -618,19 +641,20 @@ def procesar_venta_ajax(request):
             total=total_venta,
             monto_recibido=monto_recibido,
             vuelto=vuelto,
-            estado=estado_venta,
-            tipo_comprobante=tipo_comprobante_final,
+            estado=estado_inicial,                      # 🔽 ANTES: estado_venta
+            tipo_comprobante=tipo_comprobante_inicial,  # 🔽 ANTES: tipo_comprobante_final
             es_remito=es_remito,
             es_factura_de_remitos=es_factura_de_remitos,
             estado_cobro=estado_cobro_val,
             saldo_pendiente=saldo_pendiente,
             direccion_entrega=direccion_entrega or None,
-            #Desglose de IVA
+            # Desglose de IVA
             subtotal_neto=imp_neto,
             iva_total=imp_iva,
             alicuota_iva=alicuota_aplicada,
             discrimina_iva=discrimina_iva,
         )
+
         registrar_log(
             request,
             accion='VENTA',
@@ -641,6 +665,7 @@ def procesar_venta_ajax(request):
                 'total': float(total_venta),
                 'metodo_pago': metodo_pago,
                 'estado': venta.estado,
+                'tipo_comprobante': venta.tipo_comprobante,
                 'cliente': cliente_obj.nombre if cliente_obj else 'Consumidor Final',
                 'items': len(items),
                 'cae': venta.cae if venta.cae else None,
@@ -709,7 +734,7 @@ def procesar_venta_ajax(request):
             and config.certificado_crt
             and config.clave_privada_key
             and config.cuit
-            and tipo_comprobante_final != 0
+            and tipo_fiscal_tentativo != 0
             and accion_comprobante in ['TICKET', 'FACTURA']
         ):
             try:
@@ -740,7 +765,7 @@ def procesar_venta_ajax(request):
                 wsfev1.Conectar(wsdl=wsdl_wsfe, cache=CACHE_DIR)
 
                 pto_vta = int(config.punto_de_venta or 1)
-                cbte_nro = int(wsfev1.CompUltimoAutorizado(tipo_comprobante_final, pto_vta) or 0) + 1
+                cbte_nro = int(wsfev1.CompUltimoAutorizado(tipo_fiscal_tentativo, pto_vta) or 0) + 1
 
                 doc_tipo = 99
                 doc_nro = 0
@@ -763,18 +788,6 @@ def procesar_venta_ajax(request):
                     except (ValueError, TypeError):
                         cond_iva_receptor = 5
 
-                # ============================================================
-                # Cálculo de IVA según tipo de comprobante
-                # ============================================================
-                # Factura A (1) y B (6): discriminan IVA 21%
-                # Factura C (11): NO discrimina IVA (emisor Monotributista)
-                # ============================================================
-
-                # ============================================================
-                # Usar el IVA ya calculado en el paso 6b (NO recalcular)
-                # ============================================================
-                # imp_neto e imp_iva ya vienen calculados arriba.
-                # Solo aseguramos que sean Decimal para la llamada a pyafipws.
                 imp_neto = Decimal(str(imp_neto))
                 imp_iva = Decimal(str(imp_iva))
 
@@ -782,7 +795,7 @@ def procesar_venta_ajax(request):
                     concepto=1,
                     tipo_doc=doc_tipo,
                     nro_doc=doc_nro,
-                    tipo_cbte=tipo_comprobante_final,
+                    tipo_cbte=tipo_fiscal_tentativo,
                     punto_vta=pto_vta,
                     cbt_desde=cbte_nro,
                     cbt_hasta=cbte_nro,
@@ -801,8 +814,7 @@ def procesar_venta_ajax(request):
                 except Exception as e:
                     logger.warning(f"No se pudo establecer condicion_iva_receptor_id: {e}")
 
-                # 🔽 Agregar alícuota de IVA SOLO para Facturas A y B (no para C)
-                if tipo_comprobante_final != 11:
+                if tipo_fiscal_tentativo != 11:
                     wsfev1.AgregarIva(5, float(imp_neto), float(imp_iva))
                     logger.info(f"IVA agregado: neto={imp_neto}, iva={imp_iva}")
                 else:
@@ -814,42 +826,107 @@ def procesar_venta_ajax(request):
                 vencimiento_obtenido = getattr(wsfev1, "Vencimiento", None)
 
                 if cae_obtenido:
+                    # ============================================================
+                    # CAE OK → promover a comprobante fiscal
+                    # ============================================================
                     venta.cae = str(cae_obtenido)
                     if vencimiento_obtenido:
                         try:
-                            venta.vencimiento_cae = datetime.strptime(str(vencimiento_obtenido), "%Y%m%d").date()
+                            venta.vencimiento_cae = datetime.strptime(
+                                str(vencimiento_obtenido), "%Y%m%d"
+                            ).date()
                         except ValueError:
-                            logger.warning(f"No se pudo parsear la fecha de vencimiento: {vencimiento_obtenido}")
+                            logger.warning(
+                                f"No se pudo parsear la fecha de vencimiento: {vencimiento_obtenido}"
+                            )
                     venta.numero_comprobante = cbte_nro
-                    venta.tipo_comprobante = tipo_comprobante_final
+                    venta.tipo_comprobante = tipo_fiscal_tentativo
+                    venta.estado = estado_venta
                     venta.save()
                     logger.info(f"CAE Autorizado para Venta #{venta.id}: {cae_obtenido}")
+
                 else:
+                    # ============================================================
+                    # SIN CAE → dejar como Documento X (no fiscal)
+                    # ============================================================
                     resultado = getattr(wsfev1, "Resultado", "Desconocido")
-                    obs = getattr(wsfev1, "Obs", "Sin observaciones")
-                    # ANTES del if cae_obtenido
-                    logger.info(f"DEBUG WSFE Resultado: {getattr(wsfev1, 'Resultado', None)!r}")
+                    errmsg = getattr(wsfev1, "ErrMsg", "") or ""
+                    obs = getattr(wsfev1, "Obs", "") or ""
+
+                    partes = []
+                    if errmsg:
+                        partes.append(str(errmsg))
+                    if obs:
+                        partes.append(str(obs))
+                    mensaje_arca = " | ".join(partes) if partes else "ARCA no devolvió CAE"
+
+                    logger.info(f"DEBUG WSFE Resultado: {resultado!r}")
                     logger.info(f"DEBUG WSFE CAE: {getattr(wsfev1, 'CAE', None)!r}")
-                    logger.info(f"DEBUG WSFE ErrMsg: {getattr(wsfev1, 'ErrMsg', None)!r}")
-                    logger.info(f"DEBUG WSFE Obs: {getattr(wsfev1, 'Obs', None)!r}")
+                    logger.info(f"DEBUG WSFE ErrMsg: {errmsg!r}")
+                    logger.info(f"DEBUG WSFE Obs: {obs!r}")
                     logger.info(f"DEBUG WSFE Detalle: {getattr(wsfev1, 'Detalle', None)!r}")
                     logger.info(f"DEBUG WSFE XmlRequest: {getattr(wsfev1, 'XmlRequest', None)}")
                     logger.info(f"DEBUG WSFE XmlResponse: {getattr(wsfev1, 'XmlResponse', None)}")
-                    logger.error(f"Respuesta ARCA sin CAE. Resultado: {resultado}, Obs: {obs}")
+                    logger.error(f"Respuesta ARCA sin CAE. Resultado: {resultado}, {mensaje_arca}")
+
+                    venta.tipo_comprobante = 0
+                    venta.estado = 'COMPROBANTE_X'
+                    venta.cae = None
+                    venta.numero_comprobante = None
+                    venta.save()
+
+                    error_arca = mensaje_arca
 
             except Exception as afip_err:
                 logger.exception(f"Excepción al conectar con ARCA/AFIP: {afip_err}")
 
+                # ============================================================
+                # EXCEPCIÓN → dejar como Documento X (no fiscal)
+                # ============================================================
+                venta.tipo_comprobante = 0
+                venta.estado = 'COMPROBANTE_X'
+                venta.cae = None
+                venta.numero_comprobante = None
+                venta.save()
+
+                error_arca = f"Error de conexión con ARCA: {afip_err}"
+
+        else:
+            # ============================================================
+            # No se intentó ARCA (falta config o no era TICKET/FACTURA)
+            # Si era TICKET/FACTURA y falta config, dejar como X.
+            # ============================================================
+            if accion_comprobante in ['TICKET', 'FACTURA'] and not (
+                config
+                and config.certificado_crt
+                and config.clave_privada_key
+                and config.cuit
+            ):
+                venta.tipo_comprobante = 0
+                venta.estado = 'COMPROBANTE_X'
+                venta.cae = None
+                venta.numero_comprobante = None
+                venta.save()
+                error_arca = "No se pudo facturar: falta configuración de ARCA (certificado, clave o CUIT)."
+
+        # ============================================================
         # 11. Respuesta exitosa
+        # 🔽 8 ESPACIOS: al mismo nivel que el "config =" del paso 10
+        # ============================================================
         return JsonResponse({
-            'status': 'success',
-            'message': 'Operación procesada correctamente.',
+            'status': 'warning' if error_arca else 'success',
+            'message': (
+                'La venta se guardó pero ARCA rechazó el CAE.'
+                if error_arca
+                else 'Operación procesada correctamente.'
+            ),
             'venta_id': venta.id,
             'estado': venta.estado,
             'estado_display': venta.get_estado_display(),
             'total': float(total_venta),
             'vuelto': float(vuelto),
             'cae': venta.cae if venta.cae else None,
+            'error_arca': error_arca,
             'repartidor': repartidor_obj.username if repartidor_obj else None,
             'desde_remitos': desde_remitos,
         })
@@ -3241,17 +3318,26 @@ def facturar_venta_existente(request, venta_id):
         # --------------------------------------------------------
         # Documento del receptor
         # --------------------------------------------------------
-        doc_tipo = 99
+        doc_tipo = 99  # Por defecto: Consumidor Final
         doc_nro = 0
 
-        if venta.cliente and venta.cliente.numero_documento:
-            doc_nro = venta.cliente.numero_documento.replace("-", "").strip()
-            if len(doc_nro) == 11:
-                doc_tipo = 80     # CUIT
-            elif len(doc_nro) == 8:
-                doc_tipo = 96     # DNI
+        if cliente_obj and cliente_obj.numero_documento:
+            doc_limpio = cliente_obj.numero_documento.replace("-", "").strip()
+                    
+            # Verificamos que no esté vacío y que no sea todo ceros
+            if doc_limpio and doc_limpio != "0" * len(doc_limpio):
+                doc_nro = doc_limpio
+                if len(doc_nro) == 11:
+                    doc_tipo = 80  # CUIT
+                elif len(doc_nro) == 8:
+                    doc_tipo = 96  # DNI
+                else:
+                    doc_tipo = 99  # Cualquier otra cosa -> Consumidor Final
+                    doc_nro = 0
             else:
-                doc_tipo = 99     # Consumidor Final
+                # Si es "00000000" o "00000000000", forzamos Consumidor Final
+                doc_tipo = 99
+                doc_nro = 0
 
         fecha_cbte = timezone.now().strftime("%Y%m%d")
 
