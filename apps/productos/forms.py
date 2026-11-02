@@ -35,7 +35,10 @@ class ProductoForm(forms.ModelForm):
             'alicuota_iva', 
             'stock_actual', 
             'stock_minimo', 
-            'activo'
+            'activo',
+            'maneja_lotes',
+            'maneja_vencimiento',
+            'metodo_salida',
         ]
         widgets = {
             'codigo_barra': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Código de barras'}),

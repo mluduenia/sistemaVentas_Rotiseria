@@ -6,6 +6,11 @@ from django.db.models import Q
 from django.db import transaction
 from django.db.models import Sum
 import logging
+from datetime import date, timedelta
+from django.shortcuts import render
+from django.http import JsonResponse
+from .models import Producto, Categoria, Proveedor, MovimientoStock, Lote, StockLote
+
 logger = logging.getLogger(__name__)
 
 from .models import Producto, Categoria, Proveedor, MovimientoStock
@@ -361,6 +366,10 @@ def cargar_stock_sucursal_view(request, producto_id):
         sucursal_id = request.POST.get('sucursal', '').strip()
         cantidad = request.POST.get('cantidad', '0').strip()
         motivo = request.POST.get('motivo', 'Carga inicial').strip()
+        
+        # 🔽 NUEVOS CAMPOS DE LOTE
+        codigo_lote = request.POST.get('codigo_lote', '').strip()
+        fecha_vencimiento = request.POST.get('fecha_vencimiento', '').strip()
 
         # Validaciones
         errores = []
@@ -372,6 +381,12 @@ def cargar_stock_sucursal_view(request, producto_id):
                 errores.append('La cantidad no puede ser cero.')
         except ValueError:
             errores.append('La cantidad debe ser un número entero.')
+            
+        # 🔽 VALIDACIÓN DE LOTES
+        if producto.maneja_lotes and not codigo_lote:
+            errores.append('Este producto requiere un código de lote.')
+        if producto.maneja_vencimiento and not fecha_vencimiento:
+            errores.append('Este producto requiere una fecha de vencimiento.')
 
         if errores:
             for err in errores:
@@ -382,34 +397,54 @@ def cargar_stock_sucursal_view(request, producto_id):
 
         try:
             with transaction.atomic():
-                # Buscar o crear el registro de stock
+                # 1. Si el producto maneja lotes, creamos el lote
+                lote_obj = None
+                if producto.maneja_lotes:
+                    # Convertimos la fecha string a date de Python
+                    from datetime import datetime
+                    f_venc = datetime.strptime(fecha_vencimiento, '%Y-%m-%d').date() if fecha_vencimiento else None
+                    
+                    lote_obj = Lote.objects.create(
+                        producto=producto,
+                        codigo_lote=codigo_lote,
+                        fecha_vencimiento=f_venc,
+                        costo_unitario=producto.precio_costo
+                    )
+                    
+                    # Actualizamos el StockLote
+                    sl = StockLote.objects.create(
+                        lote=lote_obj,
+                        sucursal=sucursal,
+                        cantidad_disponible=cantidad
+                    )
+
+                # 2. Actualizar el StockSucursal (el de siempre)
                 ss, created = StockSucursal.objects.get_or_create(
                     producto=producto,
                     sucursal=sucursal,
                     defaults={'cantidad': 0}
                 )
-
-                # Sumar (o restar) la cantidad
                 ss.cantidad += cantidad
                 if ss.cantidad < 0:
                     messages.error(request, f'No podés restar más de lo que hay. Stock actual: {ss.cantidad - cantidad}')
                     return redirect('productos:cargar_stock_sucursal', producto_id=producto.id)
                 ss.save()
 
-                # Recalcular el stock total del producto
+                # 3. Recalcular el stock total del producto
                 total = StockSucursal.objects.filter(producto=producto).aggregate(
                     t=Sum('cantidad')
                 )['t'] or 0
                 producto.stock_actual = total
                 producto.save()
 
-                # Registrar el movimiento
+                # 4. Registrar el movimiento (ahora con el lote asociado)
                 MovimientoStock.objects.create(
                     producto=producto,
                     sucursal=sucursal,
                     tipo='AJUSTE' if cantidad < 0 else 'ENTRADA',
                     cantidad=abs(cantidad),
                     motivo=f'{motivo} - {sucursal.nombre}',
+                    lote=lote_obj  # 🔽 Vinculamos el lote
                 )
 
             messages.success(
@@ -468,3 +503,70 @@ def reactivar_producto(request, pk):
 
     return redirect('productos:lista_productos')
 
+@login_required
+@user_passes_test(es_admin_o_super)
+def api_lotes_producto(request, producto_id):
+    """Devuelve los lotes con stock disponible de un producto en formato JSON."""
+    # Buscamos los lotes que tengan stock mayor a 0
+    stocks = StockLote.objects.filter(
+        lote__producto_id=producto_id,
+        cantidad_disponible__gt=0
+    ).select_related('lote')
+    
+    # Agrupamos por lote (por si hay stock en varias sucursales)
+    lotes_dict = {}
+    for s in stocks:
+        if s.lote.id not in lotes_dict:
+            lotes_dict[s.lote.id] = {
+                'codigo': s.lote.codigo_lote,
+                'vencimiento': s.lote.fecha_vencimiento.strftime('%d/%m/%Y') if s.lote.fecha_vencimiento else None,
+                'cantidad': 0
+            }
+        lotes_dict[s.lote.id]['cantidad'] += s.cantidad_disponible
+
+    # Convertimos a lista y ordenamos por fecha de vencimiento (los más próximos primero)
+    lotes = list(lotes_dict.values())
+    lotes.sort(key=lambda x: x['vencimiento'] if x['vencimiento'] else '9999')
+
+    return JsonResponse({'lotes': lotes})
+
+@login_required
+@user_passes_test(es_admin_o_super)
+def alertas_vencimiento_view(request):
+    """
+    Muestra los lotes que están por vencer o ya vencidos.
+    Por defecto, muestra los que vencen en los próximos 30 días.
+    """
+    dias_alerta = int(request.GET.get('dias', 30))
+    hoy = date.today()
+    fecha_limite = hoy + timedelta(days=dias_alerta)
+
+    # Buscamos lotes con stock > 0 que venzan antes de la fecha límite (incluye vencidos)
+    lotes_alerta = StockLote.objects.filter(
+        cantidad_disponible__gt=0,
+        lote__fecha_vencimiento__isnull=False,
+        lote__fecha_vencimiento__lte=fecha_limite
+    ).select_related('lote', 'lote__producto', 'sucursal').order_by('lote__fecha_vencimiento')
+
+    # Separamos los ya vencidos de los que están por vencer
+    vencidos = []
+    por_vencer = []
+
+    for sl in lotes_alerta:
+        # Calculamos los días restantes
+        dias_restantes = (sl.lote.fecha_vencimiento - hoy).days
+        
+        sl.dias_restantes = dias_restantes # Lo inyectamos en el objeto para usarlo en el template
+
+        if dias_restantes < 0:
+            vencidos.append(sl)
+        else:
+            por_vencer.append(sl)
+
+    context = {
+        'vencidos': vencidos,
+        'por_vencer': por_vencer,
+        'dias_alerta': dias_alerta,
+        'total_items': len(vencidos) + len(por_vencer),
+    }
+    return render(request, 'productos/alertas_vencimiento.html', context)

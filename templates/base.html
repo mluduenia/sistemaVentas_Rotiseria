@@ -87,7 +87,6 @@
 
                 <!-- ============================================================ -->
                 <!-- 3. SUBMENÚ VENTAS                                             -->
-                <!-- No aparece para repartidor ni deposito                        -->
                 <!-- ============================================================ -->
                 {% if request.user.rol != 'repartidor' and request.user.rol != 'deposito' %}
                 <div class="nav-item">
@@ -100,19 +99,16 @@
                     <div class="collapse" id="submenuVentas">
                         <nav class="nav nav-pills flex-column ps-3 gap-1 mt-1">
 
-                            <!-- Punto de Venta: SOLO requiere puede_vender o puede_cobrar -->
                             {% if request.user.puede_vender or request.user.puede_cobrar %}
                             <a href="{% url 'ventas:pos' %}" class="nav-link text-white-50 py-1 px-3 rounded small {% if request.resolver_match.url_name == 'pos' %}active text-white{% endif %}">
                                 <i class="fas fa-cash-register me-2"></i> Punto de Venta
                             </a>
                             {% endif %}
 
-                            <!-- Historial -->
                             <a href="{% url 'ventas:lista_ventas' %}" class="nav-link text-white-50 py-1 px-3 rounded small {% if request.resolver_match.url_name == 'lista_ventas' %}active text-white{% endif %}">
                                 <i class="fas fa-list-alt me-2"></i> Consultar Historial
                             </a>
 
-                            <!-- Remitos Pendientes: admin/gerente/supervisor/cajero -->
                             {% if request.user.puede_cobrar or request.user.puede_ver_todo %}
                             {% if modulos.reparto %}
                             <a href="{% url 'ventas:remitos_pendientes' %}" class="nav-link text-white-50 py-1 px-3 rounded small {% if request.resolver_match.url_name == 'remitos_pendientes' %}active text-white{% endif %}">
@@ -124,7 +120,6 @@
                             {% endif %}
                             {% endif %}
 
-                            <!-- Repartidores con Deuda: admin/gerente/supervisor -->
                             {% if request.user.puede_ver_todo %}
                             {% if modulos.reparto %}
                             <a href="{% url 'ventas:repartidores_con_deuda' %}" class="nav-link text-white-50 py-1 px-3 rounded small {% if 'repartidores-con-deuda' in request.path %}active text-white{% endif %}">
@@ -133,7 +128,6 @@
                             {% endif %}
                             {% endif %}
 
-                            <!-- Cuentas Corrientes: admin/gerente/supervisor/cajero -->
                             {% if request.user.puede_cobrar or request.user.puede_ver_todo %}
                             {% if modulos.cuenta_corriente %}
                             <a href="{% url 'ventas:cuentas_corrientes' %}" class="nav-link text-white-50 py-1 px-3 rounded small {% if request.resolver_match.url_name == 'cuentas_corrientes' %}active text-white{% endif %}">
@@ -142,7 +136,6 @@
                             {% endif %}
                             {% endif %}
 
-                            <!-- Arqueo / Informes: admin/gerente/supervisor/cajero/vendedor -->
                             {% if request.user.puede_cerrar_caja %}
                             <hr class="my-1 border-secondary opacity-25">
                             <a href="{% url 'ventas:cerrar_caja' %}" class="nav-link text-warning py-1 px-3 rounded small {% if request.resolver_match.url_name == 'cerrar_caja' %}active text-white{% endif %}">
@@ -160,7 +153,6 @@
 
                 <!-- ============================================================ -->
                 <!-- 4. SUBMENÚ CONFIG. DE VENTAS                                  -->
-                <!-- Solo admin, gerente y supervisor                              -->
                 <!-- ============================================================ -->
                 {% if request.user.puede_gestionar_usuarios or request.user.rol == 'supervisor' %}
                 <div class="nav-item">
@@ -218,6 +210,11 @@
                             </a>
                             <a href="{% url 'productos:movimientos_stock' %}" class="nav-link text-white-50 py-1 px-3 rounded small {% if request.resolver_match.url_name == 'movimientos_stock' %}active text-white{% endif %}">
                                 <i class="fas fa-exchange-alt me-2"></i> Movimientos de Stock
+                            </a>
+
+                            <!-- 🔽 NUEVO: Botón de Alertas de Vencimiento -->
+                            <a href="{% url 'productos:alertas_vencimiento' %}" class="nav-link text-white-50 py-1 px-3 rounded small {% if 'alertas' in request.path %}active text-white{% endif %}">
+                                <i class="fas fa-exclamation-triangle me-2 text-danger"></i> Alertas de Vencimiento
                             </a>
 
                             {% if request.user.puede_gestionar_deposito %}
@@ -442,6 +439,10 @@
                 <hr class="my-1 border-secondary opacity-25">
                 <a href="{% url 'productos:lista_productos' %}" class="nav-link text-body py-2"><i class="fas fa-boxes me-2"></i> Productos / Stock</a>
                 <a href="{% url 'productos:movimientos_stock' %}" class="nav-link text-body py-2"><i class="fas fa-exchange-alt me-2"></i> Movimientos de Stock</a>
+                
+                <!-- 🔽 NUEVO: Alerta de Vencimiento en móvil -->
+                <a href="{% url 'productos:alertas_vencimiento' %}" class="nav-link text-body py-2"><i class="fas fa-exclamation-triangle me-2 text-danger"></i> Alertas de Vencimiento</a>
+                
                 {% if request.user.puede_gestionar_deposito %}
                 <a href="{% url 'productos:lista_categorias' %}" class="nav-link text-body py-2"><i class="fas fa-tags me-2"></i> Rubros</a>
                 <a href="{% url 'productos:lista_proveedores' %}" class="nav-link text-body py-2"><i class="fas fa-truck me-2"></i> Proveedores</a>
@@ -697,5 +698,41 @@
 </script>
 
 {% block extra_js %}{% endblock %}
+{% if request.session.es_demo %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Crear el contador visual
+        const timerDiv = document.createElement('div');
+        timerDiv.className = 'badge bg-danger fs-6 position-fixed top-0 start-50 translate-middle-x mt-3 shadow';
+        timerDiv.style.zIndex = '9999';
+        timerDiv.innerHTML = 'Demo expira en: <span id="tiempo-restante">05:00</span>';
+        document.body.appendChild(timerDiv);
+
+        let tiempoInicio = {{ request.session.demo_inicio }} * 1000;
+        let duracion = 5 * 60 * 1000; // 5 minutos
+
+        function actualizarContador() {
+            let ahora = new Date().getTime();
+            let transcurrido = ahora - tiempoInicio;
+            let restante = duracion - transcurrido;
+
+            if (restante <= 0) {
+                document.getElementById('tiempo-restante').innerText = "00:00";
+                window.location.reload(); // Fuerza recarga para que el Middleware te saque
+                return;
+            }
+
+            let minutos = Math.floor(restante / 60000);
+            let segundos = Math.floor((restante % 60000) / 1000);
+            
+            document.getElementById('tiempo-restante').innerText = 
+                `${minutos.toString().padStart(2, '0')}:${segundos.toString().padStart(2, '0')}`;
+        }
+
+        setInterval(actualizarContador, 1000);
+        actualizarContador();
+    });
+</script>
+{% endif %}
 </body>
 </html>

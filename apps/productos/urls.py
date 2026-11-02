@@ -26,4 +26,6 @@ urlpatterns = [
     path('stock/movimientos/', views.movimientos_stock_view, name='movimientos_stock'),
     path('producto/<int:producto_id>/cargar-stock/', views.cargar_stock_sucursal_view, name='cargar_stock_sucursal'),
     path('producto/<int:pk>/reactivar/', views.reactivar_producto, name='reactivar_producto'),
+    path('api/lotes/<int:producto_id>/', views.api_lotes_producto, name='api_lotes_producto'),
+    path('alertas-vencimiento/', views.alertas_vencimiento_view, name='alertas_vencimiento'),
 ]

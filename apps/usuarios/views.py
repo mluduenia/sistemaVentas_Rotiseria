@@ -6,6 +6,11 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.core.paginator import Paginator
 from django.db.models import Q
 from functools import wraps
+from django.core.cache import cache
+from django.utils import timezone
+from datetime import timedelta
+import time
+
 
 from .forms import RegistroUsuarioForm
 from .models import Usuario, PermisoTemporal
@@ -33,6 +38,13 @@ def solo_admin_gerente(view_func):
 # ============================================================
 def login_view(request):
     """Inicio de sesión."""
+    # 1. Verificamos si la demo está bloqueada
+    bloqueo_demo = cache.get('demo_bloqueada_hasta')
+    if bloqueo_demo and timezone.now().timestamp() < bloqueo_demo:
+        minutos_restantes = int((bloqueo_demo - timezone.now().timestamp()) / 60) + 1
+        messages.error(request, f'La cuenta Demo está en pausa. Volvé a intentar en {minutos_restantes} minutos.')
+        return render(request, 'usuarios/login.html', {'form': AuthenticationForm()})
+
     if request.user.is_authenticated:
         return redirect('core:dashboard')
 
@@ -41,6 +53,25 @@ def login_view(request):
         if form.is_valid():
             username = form.cleaned_data.get('username')
             password = form.cleaned_data.get('password')
+            
+            # 2. Lógica especial para el usuario DEMO
+            if username == 'demo' and password == 'demo':
+                # Creamos el usuario demo al vuelo si no existe, o lo tomamos
+                user, created = Usuario.objects.get_or_create(
+                    username='demo',
+                    defaults={'rol': 'admin', 'activo': True, 'is_superuser': True, 'is_staff': True}
+                )
+                login(request, user)
+                
+                # Marcamos la sesión como demo y guardamos el tiempo de inicio
+                request.session['es_demo'] = True
+                request.session['demo_inicio'] = timezone.now().timestamp()
+                request.session.set_expiry(300) # Expira en 5 minutos (300 segundos)
+                
+                messages.success(request, '¡Bienvenido al Modo Demo! Tenés 5 minutos para probar el sistema.')
+                return redirect('core:dashboard')
+
+            # 3. Lógica normal para el resto de los usuarios
             user = authenticate(username=username, password=password)
             if user is not None:
                 if not user.activo:

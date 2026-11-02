@@ -101,6 +101,8 @@ MIDDLEWARE = [
     'session_security.middleware.SessionSecurityMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'middleware_demo.DemoTimeLimitMiddleware',
+    'middleware_demo.DemoReadOnlyMiddleware',
 ]
 
 

@@ -1,0 +1,135 @@
+{% extends 'base.html' %}
+
+{% block title %}Alertas de Vencimiento{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h3 class="fw-bold mb-0 text-body">
+        <i class="fas fa-exclamation-triangle text-danger me-2"></i> Alertas de Vencimiento
+    </h3>
+    <div class="d-flex gap-2">
+        <!-- 
+          🔽 CORRECCIÓN: 
+          1. Le pusimos id="form-filtro-dias" 
+          2. El onsubmit limpia la alerta de session_security 
+        -->
+        <form method="GET" id="form-filtro-dias" class="d-flex align-items-center gap-2" onsubmit="window.onbeforeunload = null;">
+            <label class="fw-bold small mb-0 text-body">Ver próximos:</label>
+            <select name="dias" class="form-select form-select-sm" onchange="window.onbeforeunload = null; this.form.submit();">
+                <option value="7" {% if dias_alerta == 7 %}selected{% endif %}>7 días</option>
+                <option value="15" {% if dias_alerta == 15 %}selected{% endif %}>15 días</option>
+                <option value="30" {% if dias_alerta == 30 %}selected{% endif %}>30 días</option>
+                <option value="60" {% if dias_alerta == 60 %}selected{% endif %}>60 días</option>
+            </select>
+        </form>
+    </div>
+</div>
+
+{% if total_items == 0 %}
+<div class="alert alert-success shadow-sm border-0">
+    <i class="fas fa-check-circle me-2"></i> ¡Todo en orden! No hay lotes vencidos ni por vencer en los próximos {{ dias_alerta }} días.
+</div>
+{% else %}
+
+    <!-- SECCIÓN: VENCIDOS -->
+    {% if vencidos %}
+    <div class="card border-0 shadow-sm mb-4 border-start border-danger border-4 bg-body">
+        <div class="card-header bg-danger text-white py-2">
+            <h5 class="mb-0 fw-bold"><i class="fas fa-skull-crossbones me-2"></i> Lotes Vencidos (Retirar de Góndola)</h5>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th class="ps-3">Producto</th>
+                            <th>Lote</th>
+                            <th>Vencimiento</th>
+                            <th>Sucursal</th>
+                            <th class="text-center">Cantidad</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in vencidos %}
+                        <tr>
+                            <td class="ps-3 fw-bold text-danger">{{ item.lote.producto.nombre }}</td>
+                            <td><span class="badge bg-secondary">{{ item.lote.codigo_lote }}</span></td>
+                            <td class="text-danger fw-bold">{{ item.lote.fecha_vencimiento|date:"d/m/Y" }} (Hace {{ item.dias_restantes|stringformat:"+d" }} días)</td>
+                            <td>{{ item.sucursal.nombre }}</td>
+                            <td class="text-center fw-bold">{{ item.cantidad_disponible }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- SECCIÓN: POR VENCER -->
+    {% if por_vencer %}
+    <div class="card border-0 shadow-sm border-start border-warning border-4 bg-body">
+        <div class="card-header bg-body-tertiary border-bottom py-2">
+            <h5 class="mb-0 fw-bold text-body">
+                <i class="fas fa-clock me-2 text-warning"></i> Próximos a Vencer (Promocionar o Devolver)
+            </h5>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th class="ps-3">Producto</th>
+                            <th>Lote</th>
+                            <th>Vencimiento</th>
+                            <th>Sucursal</th>
+                            <th class="text-center">Cantidad</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in por_vencer %}
+                        <tr>
+                            <td class="ps-3 fw-bold">{{ item.lote.producto.nombre }}</td>
+                            <td><span class="badge bg-secondary">{{ item.lote.codigo_lote }}</span></td>
+                            <td class="fw-bold">{{ item.lote.fecha_vencimiento|date:"d/m/Y" }} (Faltan {{ item.dias_restantes }} días)</td>
+                            <td>{{ item.sucursal.nombre }}</td>
+                            <td class="text-center fw-bold">{{ item.cantidad_disponible }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    // 1. Desactivar la confirmación de session_security para este formulario
+    if (window.sessionSecurity) {
+        window.sessionSecurity.confirmFormDiscard = null;
+    }
+
+    // 2. Limpiar los estados de los inputs para que el navegador no crea que hubo cambios
+    setTimeout(() => {
+        document.querySelectorAll('input, select, textarea').forEach(el => {
+            el.defaultValue = el.value; 
+            if (el.tagName === 'SELECT') {
+                Array.from(el.options).forEach(opt => {
+                    opt.defaultSelected = opt.selected;
+                });
+            } else if (el.type === 'checkbox' || el.type === 'radio') {
+                el.defaultChecked = el.checked;
+            }
+        });
+    }, 100);
+
+    // 3. Asegurarnos de que el beforeunload esté vacío
+    window.onbeforeunload = null;
+});
+</script>
+{% endblock %}

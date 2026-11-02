@@ -133,6 +133,37 @@
                                    placeholder="5" 
                                    value="{{ form.stock_minimo.value|default:'5' }}">
                         </div>
+
+                        <!-- 🔽 NUEVO: CONFIGURACIÓN DE LOTES Y VENCIMIENTOS -->
+                        <div class="col-12 mt-4">
+                            <div class="p-3 border rounded bg-body-tertiary">
+                                <h6 class="fw-bold mb-3"><i class="fas fa-barcode text-primary me-2"></i> Control Avanzado de Inventario</h6>
+                                
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" name="maneja_lotes" id="id_maneja_lotes" {% if form.maneja_lotes.value %}checked{% endif %}>
+                                    <label class="form-check-label fw-semibold" for="id_maneja_lotes">
+                                        Este producto maneja Lotes
+                                    </label>
+                                    <small class="d-block text-muted">Obliga a ingresar un código de lote al cargar stock.</small>
+                                </div>
+
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" name="maneja_vencimiento" id="id_maneja_vencimiento" {% if form.maneja_vencimiento.value %}checked{% endif %}>
+                                    <label class="form-check-label fw-semibold" for="id_maneja_vencimiento">
+                                        Este producto maneja Fecha de Vencimiento
+                                    </label>
+                                    <small class="d-block text-muted">Habilita la alerta de vencimiento y el descuento FEFO.</small>
+                                </div>
+
+                                <div class="mt-3">
+                                    <label for="id_metodo_salida" class="form-label fw-bold small">Método de Salida (Descuento de Stock)</label>
+                                    <select name="metodo_salida" id="id_metodo_salida" class="form-select form-select-sm">
+                                        <option value="FIFO" {% if form.metodo_salida.value == 'FIFO' %}selected{% endif %}>FIFO (Primero en entrar, primero en salir)</option>
+                                        <option value="FEFO" {% if form.metodo_salida.value == 'FEFO' %}selected{% endif %}>FEFO (Primero en vencer, primero en salir)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <hr class="my-4">
@@ -230,6 +261,30 @@ document.addEventListener('DOMContentLoaded', function () {
     if (btnEscanearProd) btnEscanearProd.addEventListener('click', iniciarCamaraProd);
     if (btnCerrarEscanerProd) btnCerrarEscanerProd.addEventListener('click', detenerCamaraProd);
     if (btnCancelarEscanerProd) btnCancelarEscanerProd.addEventListener('click', detenerCamaraProd);
+});
+</script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const form = document.getElementById('form_producto');
+    
+    // Cuando se carga la página, reseteamos el estado de los campos
+    // para que el navegador no crea que hubo cambios.
+    if (form) {
+        // Un pequeño delay para que el navegador termine de autocompletar
+        setTimeout(() => {
+            form.querySelectorAll('input, select, textarea').forEach(el => {
+                // Esto hace que el navegador olvide el estado original
+                el.defaultValue = el.value; 
+                if (el.tagName === 'SELECT') {
+                    Array.from(el.options).forEach(opt => {
+                        opt.defaultSelected = opt.selected;
+                    });
+                } else if (el.type === 'checkbox' || el.type === 'radio') {
+                    el.defaultChecked = el.checked;
+                }
+            });
+        }, 100);
+    }
 });
 </script>
 {% endblock %}

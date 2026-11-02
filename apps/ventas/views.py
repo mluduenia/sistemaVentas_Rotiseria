@@ -372,6 +372,40 @@ def abrir_caja(request):
         'remitos_heredados': remitos_heredados[:10],
     })
 
+# Decorador para demo - Corta el flujo ANTES de tocar ARCA o la BD
+from functools import wraps
+from django.http import JsonResponse
+
+def rollback_si_es_demo(view_func):
+    @wraps(view_func)
+    def _wrapped_view(request, *args, **kwargs):
+        # Si es demo, interceptamos la petición ANTES de ejecutar la vista
+        if request.user.is_authenticated and request.session.get('es_demo'):
+            
+            # Simulamos un cálculo de total básico para que el POS no muestre $0.00
+            # (Si querés ser más preciso, podrías parsear el JSON del request acá)
+            total_simulado = 1500.50 
+            
+            # Devolvemos una respuesta exitosa falsa directamente.
+            # De esta forma, la vista NUNCA se ejecuta.
+            # No hay conexión a ARCA. No hay guardado en la base de datos.
+            # No hay descuento de stock.
+            return JsonResponse({
+                'status': 'success',
+                'message': 'Operación simulada en Demo (No guardada ni enviada a ARCA)',
+                'venta_id': 9999,
+                'cae': '00000000000000',
+                'estado_display': 'Completado (Demo)',
+                'total': total_simulado,
+                'vuelto': 0.0,
+                'error_arca': None,
+            })
+
+        # Si no es demo, ejecuta la vista normalmente
+        return view_func(request, *args, **kwargs)
+    return _wrapped_view
+
+
 @login_required
 @solo_no_repartidor
 @csrf_exempt
@@ -530,11 +564,28 @@ def procesar_venta_ajax(request):
 
             # 🔽 Si viene desde remitos, NO verificar stock (ya se descontó antes)
             if not desde_remitos:
+                # Validación normal de stock global
                 if producto.stock_actual < cantidad:
                     return JsonResponse({
                         'status': 'error',
                         'message': f'Stock insuficiente para "{producto.nombre}". Disponible: {producto.stock_actual}'
                     }, status=400)
+
+                # 🔽 NUEVA VALIDACIÓN: Si maneja lotes, verificar que haya stock real en los lotes
+                if producto.maneja_lotes and turno_activo.sucursal_id:
+                    from apps.productos.models import StockLote
+                    from django.db.models import Sum
+                    
+                    stock_real_lotes = StockLote.objects.filter(
+                        lote__producto=producto,
+                        sucursal_id=turno_activo.sucursal_id
+                    ).aggregate(t=Sum('cantidad_disponible'))['t'] or 0
+                    
+                    if stock_real_lotes < cantidad:
+                        return JsonResponse({
+                            'status': 'error',
+                            'message': f'El producto "{producto.nombre}" maneja lotes, pero no hay suficiente stock físico cargado en los lotes de esta sucursal. (Disponible en lotes: {stock_real_lotes})'
+                        }, status=400)
 
             # 🔽 Si viene desde remitos, usar el precio que viene del remito
             if desde_remitos and 'precio' in item:
@@ -672,7 +723,7 @@ def procesar_venta_ajax(request):
             },
         )
 
-        # 9. Crear Detalles de Venta
+                # 9. Crear Detalles de Venta y Descontar Stock
         for det in detalles_a_crear:
             prod = det['producto']
             cant = det['cantidad']
@@ -687,33 +738,78 @@ def procesar_venta_ajax(request):
 
             # 🔽 SOLO descontar stock si NO viene desde remitos
             if not desde_remitos:
-                from apps.productos.models import StockSucursal
+                from apps.productos.models import StockSucursal, StockLote, Lote
+                from django.db.models import F
 
-                # Stock global (compatibilidad)
-                prod.stock_actual -= cant
-                prod.save()
-
-                # Stock por sucursal (solo si el turno tiene sucursal)
+                # 1. Descontar del StockSucursal (el contador rápido)
                 if turno_activo.sucursal_id:
-                    ss, _ = StockSucursal.objects.get_or_create(
+                    ss, _ = StockSucursal.objects.select_for_update().get_or_create(
                         producto=prod,
                         sucursal_id=turno_activo.sucursal_id,
                         defaults={'cantidad': 0}
                     )
-                    ss.cantidad -= cant
+                    ss.cantidad = F('cantidad') - cant
                     ss.save()
+                    ss.refresh_from_db()
 
-                motivo_movimiento = f'Venta POS #{venta.id} [{estado_venta}]'
-                if repartidor_obj:
-                    motivo_movimiento += f' - Asignado a Repartidor: {repartidor_obj.username}'
+                # 2. Si el producto maneja lotes, hacemos el descuento FEFO/FIFO
+                if prod.maneja_lotes:
+                    cantidad_pendiente = cant
+                    
+                    # Buscamos los lotes de este producto en esta sucursal que tengan stock
+                    # Ordenamos según el método configurado en el producto
+                    if prod.metodo_salida == 'FEFO':
+                        # Primero los que vencen antes (los nulos van al final)
+                        stocks_lotes = StockLote.objects.select_for_update().filter(
+                            lote__producto=prod,
+                            sucursal_id=turno_activo.sucursal_id,
+                            cantidad_disponible__gt=0
+                        ).order_by(F('lote__fecha_vencimiento').asc(nulls_last=True), 'lote__fecha_ingreso')
+                    else:
+                        # FIFO: Primero los que entraron antes
+                        stocks_lotes = StockLote.objects.select_for_update().filter(
+                            lote__producto=prod,
+                            sucursal_id=turno_activo.sucursal_id,
+                            cantidad_disponible__gt=0
+                        ).order_by('lote__fecha_ingreso')
 
-                MovimientoStock.objects.create(
-                    producto=prod,
-                    sucursal=turno_activo.sucursal,
-                    tipo='VENTA',
-                    cantidad=cant,
-                    motivo=motivo_movimiento
-                )
+                    # Recorremos los lotes hasta cubrir la cantidad solicitada
+                    for sl in stocks_lotes:
+                        if cantidad_pendiente <= 0:
+                            break
+                        
+                        if sl.cantidad_disponible >= cantidad_pendiente:
+                            sl.cantidad_disponible -= cantidad_pendiente
+                            cantidad_pendiente = 0
+                        else:
+                            cantidad_pendiente -= sl.cantidad_disponible
+                            sl.cantidad_disponible = 0
+                        
+                        sl.save()
+
+                    # Registrar en el MovimientoStock vinculado al primer lote usado (opcional)
+                    # (Para simplificar, registramos un solo movimiento general de venta)
+                    MovimientoStock.objects.create(
+                        producto=prod,
+                        sucursal=turno_activo.sucursal,
+                        tipo='VENTA',
+                        cantidad=cant,
+                        motivo=f'Venta POS #{venta.id} [{prod.metodo_salida}]'
+                    )
+
+                else:
+                    # Si NO maneja lotes, descontamos del stock global directo
+                    prod.stock_actual = F('stock_actual') - cant
+                    prod.save()
+                    prod.refresh_from_db()
+                    
+                    MovimientoStock.objects.create(
+                        producto=prod,
+                        sucursal=turno_activo.sucursal,
+                        tipo='VENTA',
+                        cantidad=cant,
+                        motivo=f'Venta POS #{venta.id}'
+                    )
 
         # 9b. Vincular remitos originales a la factura
         if desde_remitos and remito_ids:

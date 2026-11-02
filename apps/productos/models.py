@@ -56,7 +56,60 @@ class Producto(models.Model):
 
     def __str__(self):
         return f"{self.nombre} ({self.codigo_barra})"
+        # --- NUEVO: Control de Lotes y Vencimientos ---
+    maneja_lotes = models.BooleanField(
+        default=False, 
+        help_text="Si está tildado, este producto requiere control de lotes y vencimientos."
+    )
+    maneja_vencimiento = models.BooleanField(
+        default=False, 
+        help_text="Si está tildado, los lotes de este producto tienen fecha de vencimiento."
+    )
+    METODO_SALIDA_CHOICES = (
+        ('FIFO', 'FIFO (Primero en entrar, primero en salir)'),
+        ('FEFO', 'FEFO (Primero en vencer, primero en salir)'),
+    )
+    metodo_salida = models.CharField(
+        max_length=10, choices=METODO_SALIDA_CHOICES, default='FIFO',
+        help_text="Criterio para descontar stock al vender."
+    )
 
+# =========================================================
+# LOTES Y VENCIMIENTOS
+# =========================================================
+
+class Lote(models.Model):
+    """Representa un lote físico de un producto que ingresó al depósito."""
+    producto = models.ForeignKey(Producto, on_delete=models.CASCADE, related_name='lotes')
+    codigo_lote = models.CharField(max_length=50, help_text="Ej: LOTE-2023-10")
+    fecha_ingreso = models.DateTimeField(auto_now_add=True)
+    fecha_vencimiento = models.DateField(null=True, blank=True, help_text="Solo si el producto maneja vencimiento.")
+    costo_unitario = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, help_text="Costo de este lote específico.")
+
+    class Meta:
+        verbose_name = 'Lote'
+        verbose_name_plural = 'Lotes'
+        ordering = ['fecha_vencimiento', 'fecha_ingreso']
+
+    def __str__(self):
+        return f"{self.producto.nombre} - Lote {self.codigo_lote}"
+
+
+class StockLote(models.Model):
+    """El libro mayor de stock, pero desglosado por lote y sucursal."""
+    lote = models.ForeignKey(Lote, on_delete=models.CASCADE, related_name='stocks')
+    sucursal = models.ForeignKey(
+        'configuracion.Sucursal', on_delete=models.CASCADE, related_name='stocks_lote'
+    )
+    cantidad_disponible = models.IntegerField(default=0)
+
+    class Meta:
+        unique_together = ('lote', 'sucursal')
+        verbose_name = 'Stock por Lote'
+        verbose_name_plural = 'Stocks por Lote'
+
+    def __str__(self):
+        return f"{self.lote} - {self.sucursal.nombre}: {self.cantidad_disponible}"
 
 class MovimientoStock(models.Model):
     TIPO_CHOICES = [
@@ -66,6 +119,10 @@ class MovimientoStock(models.Model):
     ]
 
     producto = models.ForeignKey(Producto, on_delete=models.CASCADE, related_name='movimientos')
+    lote = models.ForeignKey(
+        Lote, on_delete=models.SET_NULL, null=True, blank=True, 
+        related_name='movimientos', help_text="Lote asociado a este movimiento"
+    )
 
     # 🔽 NUEVO: Sucursal donde se hizo el movimiento
     sucursal = models.ForeignKey(

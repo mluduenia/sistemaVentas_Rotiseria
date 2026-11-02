@@ -63,6 +63,23 @@
                                    placeholder="Ej: Compra a proveedor, Devolución, Ajuste por inventario...">
                         </div>
 
+                        <!-- 🔽 NUEVO: CAMPOS DE LOTE Y VENCIMIENTO -->
+                        {% if producto.maneja_lotes %}
+                        <div class="mb-3 p-3 border rounded bg-warning-subtle">
+                            <label class="form-label fw-bold text-dark">Código de Lote <span class="text-danger">*</span></label>
+                            <input type="text" name="codigo_lote" class="form-control" placeholder="Ej: LOTE-2023-10" required>
+                            <small class="text-muted">Este producto requiere identificar el lote que está ingresando.</small>
+                        </div>
+                        {% endif %}
+
+                        {% if producto.maneja_vencimiento %}
+                        <div class="mb-3 p-3 border rounded bg-danger-subtle">
+                            <label class="form-label fw-bold text-dark">Fecha de Vencimiento <span class="text-danger">*</span></label>
+                            <input type="date" name="fecha_vencimiento" class="form-control" required>
+                            <small class="text-muted">El sistema usará esta fecha para el descuento FEFO.</small>
+                        </div>
+                        {% endif %}
+
                         <div class="d-flex justify-content-end gap-2 border-top pt-3">
                             <a href="{% url 'productos:lista_productos' %}" class="btn btn-secondary px-4">
                                 Cancelar
