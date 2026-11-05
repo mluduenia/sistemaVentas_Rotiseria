@@ -434,6 +434,7 @@ def procesar_venta_ajax(request):
             desde_remitos = data.get('desde_remitos', False)  
             remito_ids = data.get('remito_ids', [])        
             direccion_entrega = data.get('direccion_entrega', '')    
+            nombre_retiro = data.get('nombre_retiro', '').strip() # 🔽 CORREGIDO
         else:
             items_str = request.POST.get('items')
             if not items_str:
@@ -452,6 +453,7 @@ def procesar_venta_ajax(request):
             desde_remitos = request.POST.get('desde_remitos', 'false').lower() == 'true'
             remito_ids = request.POST.getlist('remito_ids')
             direccion_entrega = request.POST.get('direccion_entrega', '')
+            nombre_retiro = request.POST.get('nombre_retiro', '').strip() # 🔽 CORREGIDO
 
         if not items:
             return JsonResponse({'status': 'error', 'message': 'El carrito está vacío.'}, status=400)
@@ -482,15 +484,13 @@ def procesar_venta_ajax(request):
             except (ValueError, TypeError):
                 logger.warning(f"vendedor_id inválido: {vendedor_id}")
 
-                # 4. Determinar Estado, Tipo y Flags según Acción
+        # 4. Determinar Estado, Tipo y Flags según Acción
         es_remito = False
         saldo_pendiente = Decimal('0.00')
 
-        # 🔽 Determinar tipo de comprobante según emisor + cliente
         config = EmpresaConfig.objects.first()
         condicion_emisor = config.condicion_iva if config else 'MO'
 
-        # 🔽 Cargar cliente_obj ANTES de usarlo
         cliente_obj = None
         if cliente_id:
             cliente_obj = Cliente.objects.filter(id=cliente_id).first()
@@ -509,22 +509,17 @@ def procesar_venta_ajax(request):
             estado_venta = 'PENDIENTE_ENTREGA' if repartidor_obj else 'ENTREGADO'
             discrimina_iva = False
         else:
-            # TICKET o FACTURA → el tipo lo determina el emisor + cliente
             estado_venta = 'COMPLETADO'
-
             if condicion_emisor == 'MO':
-                # Monotributista → siempre Factura C
                 tipo_comprobante_final = 11
                 discrimina_iva = False
             elif condicion_emisor == 'RI':
-                # Responsable Inscripto → según cliente
                 if cliente_obj and cliente_obj.condicion_iva == '1':
-                    tipo_comprobante_final = 1  # Factura A
+                    tipo_comprobante_final = 1
                 else:
-                    tipo_comprobante_final = 6  # Factura B
+                    tipo_comprobante_final = 6
                 discrimina_iva = True
             else:
-                # Exento → siempre Factura C
                 tipo_comprobante_final = 11
                 discrimina_iva = False
 
@@ -533,22 +528,11 @@ def procesar_venta_ajax(request):
         # ============================================================
         if accion_comprobante in ['TICKET', 'FACTURA']:
             if condicion_emisor == 'MO' and tipo_comprobante_final in [1, 6]:
-                return JsonResponse({
-                    'status': 'error',
-                    'message': 'Un Monotributista no puede emitir Facturas A o B. Solo Factura C.'
-                }, status=400)
-
+                return JsonResponse({'status': 'error', 'message': 'Un Monotributista no puede emitir Facturas A o B. Solo Factura C.'}, status=400)
             if condicion_emisor == 'RI' and tipo_comprobante_final == 11:
-                return JsonResponse({
-                    'status': 'error',
-                    'message': 'Un Responsable Inscripto debe emitir Factura A o B.'
-                }, status=400)
-
+                return JsonResponse({'status': 'error', 'message': 'Un Responsable Inscripto debe emitir Factura A o B.'}, status=400)
             if tipo_comprobante_final == 1 and (not cliente_obj or cliente_obj.condicion_iva != '1'):
-                return JsonResponse({
-                    'status': 'error',
-                    'message': 'Factura A solo se puede emitir a Responsable Inscripto.'
-                }, status=400)
+                return JsonResponse({'status': 'error', 'message': 'Factura A solo se puede emitir a Responsable Inscripto.'}, status=400)
 
         # 5. Procesar Ítems y Calcular Totales
         total_venta = Decimal('0.00')
@@ -562,16 +546,10 @@ def procesar_venta_ajax(request):
 
             producto = Producto.objects.select_for_update().get(pk=prod_id)
 
-            # 🔽 Si viene desde remitos, NO verificar stock (ya se descontó antes)
             if not desde_remitos:
-                # Validación normal de stock global
                 if producto.stock_actual < cantidad:
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': f'Stock insuficiente para "{producto.nombre}". Disponible: {producto.stock_actual}'
-                    }, status=400)
+                    return JsonResponse({'status': 'error', 'message': f'Stock insuficiente para "{producto.nombre}". Disponible: {producto.stock_actual}'}, status=400)
 
-                # 🔽 NUEVA VALIDACIÓN: Si maneja lotes, verificar que haya stock real en los lotes
                 if producto.maneja_lotes and turno_activo.sucursal_id:
                     from apps.productos.models import StockLote
                     from django.db.models import Sum
@@ -582,12 +560,8 @@ def procesar_venta_ajax(request):
                     ).aggregate(t=Sum('cantidad_disponible'))['t'] or 0
                     
                     if stock_real_lotes < cantidad:
-                        return JsonResponse({
-                            'status': 'error',
-                            'message': f'El producto "{producto.nombre}" maneja lotes, pero no hay suficiente stock físico cargado en los lotes de esta sucursal. (Disponible en lotes: {stock_real_lotes})'
-                        }, status=400)
+                        return JsonResponse({'status': 'error', 'message': f'El producto "{producto.nombre}" maneja lotes, pero no hay suficiente stock físico cargado en los lotes de esta sucursal. (Disponible en lotes: {stock_real_lotes})'}, status=400)
 
-            # 🔽 Si viene desde remitos, usar el precio que viene del remito
             if desde_remitos and 'precio' in item:
                 precio = Decimal(str(item['precio']))
             else:
@@ -607,79 +581,52 @@ def procesar_venta_ajax(request):
         monto_recibido = Decimal(str(monto_recibido))
         vuelto = max(Decimal('0.00'), monto_recibido - total_venta)
 
-        # ============================================================
         # 6b. CALCULAR DESGLOSE DE IVA
-        # ============================================================
         if discrimina_iva and config:
             alicuota = Decimal(str(config.alicuota_iva_default)) / Decimal('100')
-
             if total_venta > 0:
-                imp_neto = (total_venta / (Decimal('1') + alicuota)).quantize(
-                    Decimal("0.01"), rounding=ROUND_HALF_UP
-                )
-                imp_iva = (total_venta - imp_neto).quantize(
-                    Decimal("0.01"), rounding=ROUND_HALF_UP
-                )
+                imp_neto = (total_venta / (Decimal('1') + alicuota)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                imp_iva = (total_venta - imp_neto).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             else:
                 imp_neto = Decimal('0.00')
                 imp_iva = Decimal('0.00')
-
             alicuota_aplicada = config.alicuota_iva_default
         else:
             imp_neto = total_venta
             imp_iva = Decimal('0.00')
             alicuota_aplicada = Decimal('0.00')
 
-
-        # 7. 🔽 VALIDACIÓN: Consumidor Final anónimo no puede ir a remito/reparto
+        # 7. VALIDACIÓN: Consumidor Final anónimo no puede ir a remito/reparto
         if not cliente_obj and (es_remito or repartidor_obj):
-            return JsonResponse({
-                'status': 'error',
-                'message': 'Para enviar a reparto, tenés que cargar un cliente. '
-                           'A Consumidor Final solo se le puede vender al contado.'
-            }, status=400)
+            return JsonResponse({'status': 'error', 'message': 'Para enviar a reparto, tenés que cargar un cliente. A Consumidor Final solo se le puede vender al contado.'}, status=400)
 
-        
-                # ============================================================
         # 8. Crear Registro de Venta
-        # La venta arranca como NO FISCAL (Documento X) hasta que
-        # ARCA confirme el CAE. Solo se promueve a Factura C si ARCA
-        # autoriza. Si ARCA rechaza, queda como Documento X.
-        # ============================================================
         if es_remito:
             saldo_pendiente = total_venta
 
-        # 🔽 Si viene desde remitos, la nueva venta es una FACTURA (no remito)
         es_factura_de_remitos = False
         if desde_remitos and remito_ids:
             es_factura_de_remitos = True
             es_remito = False
             estado_venta = 'COMPLETADO'
-            saldo_pendiente = total_venta  # queda pendiente de cobro
+            saldo_pendiente = total_venta
             estado_cobro_val = 'PENDIENTE'
         else:
             estado_cobro_val = 'PENDIENTE' if es_remito else 'COBRADO'
 
-        # 🔽 NUEVO: Consumidor Final anónimo siempre se cobra al instante
         if not cliente_obj:
             estado_cobro_val = 'COBRADO'
             saldo_pendiente = Decimal('0.00')
 
-        # ============================================================
-        # Tipo fiscal tentativo: solo se aplica si ARCA autoriza el CAE.
-        # La venta arranca como Documento X (tipo 0) para no emitir
-        # una Factura C sin CAE si ARCA rechaza.
-        # ============================================================
         tipo_fiscal_tentativo = tipo_comprobante_final
 
         if accion_comprobante in ['TICKET', 'FACTURA']:
-            tipo_comprobante_inicial = 0          # Documento X (no fiscal)
+            tipo_comprobante_inicial = 0
             estado_inicial = 'PENDIENTE_CAE'
         else:
             tipo_comprobante_inicial = tipo_comprobante_final
             estado_inicial = estado_venta
 
-        # Flag para saber si ARCA rechazó (se completa en el paso 10)
         error_arca = None
 
         venta = Venta.objects.create(
@@ -692,14 +639,14 @@ def procesar_venta_ajax(request):
             total=total_venta,
             monto_recibido=monto_recibido,
             vuelto=vuelto,
-            estado=estado_inicial,                      # 🔽 ANTES: estado_venta
-            tipo_comprobante=tipo_comprobante_inicial,  # 🔽 ANTES: tipo_comprobante_final
+            estado=estado_inicial,
+            tipo_comprobante=tipo_comprobante_inicial,
             es_remito=es_remito,
             es_factura_de_remitos=es_factura_de_remitos,
             estado_cobro=estado_cobro_val,
             saldo_pendiente=saldo_pendiente,
+            nombre_retiro=nombre_retiro,
             direccion_entrega=direccion_entrega or None,
-            # Desglose de IVA
             subtotal_neto=imp_neto,
             iva_total=imp_iva,
             alicuota_iva=alicuota_aplicada,
@@ -723,7 +670,7 @@ def procesar_venta_ajax(request):
             },
         )
 
-                # 9. Crear Detalles de Venta y Descontar Stock
+        # 9. Crear Detalles de Venta y Descontar Stock
         for det in detalles_a_crear:
             prod = det['producto']
             cant = det['cantidad']
@@ -736,12 +683,10 @@ def procesar_venta_ajax(request):
                 subtotal=det['subtotal'],
             )
 
-            # 🔽 SOLO descontar stock si NO viene desde remitos
             if not desde_remitos:
                 from apps.productos.models import StockSucursal, StockLote, Lote
                 from django.db.models import F
 
-                # 1. Descontar del StockSucursal (el contador rápido)
                 if turno_activo.sucursal_id:
                     ss, _ = StockSucursal.objects.select_for_update().get_or_create(
                         producto=prod,
@@ -752,43 +697,32 @@ def procesar_venta_ajax(request):
                     ss.save()
                     ss.refresh_from_db()
 
-                # 2. Si el producto maneja lotes, hacemos el descuento FEFO/FIFO
                 if prod.maneja_lotes:
                     cantidad_pendiente = cant
-                    
-                    # Buscamos los lotes de este producto en esta sucursal que tengan stock
-                    # Ordenamos según el método configurado en el producto
                     if prod.metodo_salida == 'FEFO':
-                        # Primero los que vencen antes (los nulos van al final)
                         stocks_lotes = StockLote.objects.select_for_update().filter(
                             lote__producto=prod,
                             sucursal_id=turno_activo.sucursal_id,
                             cantidad_disponible__gt=0
                         ).order_by(F('lote__fecha_vencimiento').asc(nulls_last=True), 'lote__fecha_ingreso')
                     else:
-                        # FIFO: Primero los que entraron antes
                         stocks_lotes = StockLote.objects.select_for_update().filter(
                             lote__producto=prod,
                             sucursal_id=turno_activo.sucursal_id,
                             cantidad_disponible__gt=0
                         ).order_by('lote__fecha_ingreso')
 
-                    # Recorremos los lotes hasta cubrir la cantidad solicitada
                     for sl in stocks_lotes:
                         if cantidad_pendiente <= 0:
                             break
-                        
                         if sl.cantidad_disponible >= cantidad_pendiente:
                             sl.cantidad_disponible -= cantidad_pendiente
                             cantidad_pendiente = 0
                         else:
                             cantidad_pendiente -= sl.cantidad_disponible
                             sl.cantidad_disponible = 0
-                        
                         sl.save()
 
-                    # Registrar en el MovimientoStock vinculado al primer lote usado (opcional)
-                    # (Para simplificar, registramos un solo movimiento general de venta)
                     MovimientoStock.objects.create(
                         producto=prod,
                         sucursal=turno_activo.sucursal,
@@ -796,9 +730,7 @@ def procesar_venta_ajax(request):
                         cantidad=cant,
                         motivo=f'Venta POS #{venta.id} [{prod.metodo_salida}]'
                     )
-
                 else:
-                    # Si NO maneja lotes, descontamos del stock global directo
                     prod.stock_actual = F('stock_actual') - cant
                     prod.save()
                     prod.refresh_from_db()
@@ -922,9 +854,6 @@ def procesar_venta_ajax(request):
                 vencimiento_obtenido = getattr(wsfev1, "Vencimiento", None)
 
                 if cae_obtenido:
-                    # ============================================================
-                    # CAE OK → promover a comprobante fiscal
-                    # ============================================================
                     venta.cae = str(cae_obtenido)
                     if vencimiento_obtenido:
                         try:
@@ -932,19 +861,13 @@ def procesar_venta_ajax(request):
                                 str(vencimiento_obtenido), "%Y%m%d"
                             ).date()
                         except ValueError:
-                            logger.warning(
-                                f"No se pudo parsear la fecha de vencimiento: {vencimiento_obtenido}"
-                            )
+                            logger.warning(f"No se pudo parsear la fecha de vencimiento: {vencimiento_obtenido}")
                     venta.numero_comprobante = cbte_nro
                     venta.tipo_comprobante = tipo_fiscal_tentativo
                     venta.estado = estado_venta
                     venta.save()
                     logger.info(f"CAE Autorizado para Venta #{venta.id}: {cae_obtenido}")
-
                 else:
-                    # ============================================================
-                    # SIN CAE → dejar como Documento X (no fiscal)
-                    # ============================================================
                     resultado = getattr(wsfev1, "Resultado", "Desconocido")
                     errmsg = getattr(wsfev1, "ErrMsg", "") or ""
                     obs = getattr(wsfev1, "Obs", "") or ""
@@ -956,13 +879,6 @@ def procesar_venta_ajax(request):
                         partes.append(str(obs))
                     mensaje_arca = " | ".join(partes) if partes else "ARCA no devolvió CAE"
 
-                    logger.info(f"DEBUG WSFE Resultado: {resultado!r}")
-                    logger.info(f"DEBUG WSFE CAE: {getattr(wsfev1, 'CAE', None)!r}")
-                    logger.info(f"DEBUG WSFE ErrMsg: {errmsg!r}")
-                    logger.info(f"DEBUG WSFE Obs: {obs!r}")
-                    logger.info(f"DEBUG WSFE Detalle: {getattr(wsfev1, 'Detalle', None)!r}")
-                    logger.info(f"DEBUG WSFE XmlRequest: {getattr(wsfev1, 'XmlRequest', None)}")
-                    logger.info(f"DEBUG WSFE XmlResponse: {getattr(wsfev1, 'XmlResponse', None)}")
                     logger.error(f"Respuesta ARCA sin CAE. Resultado: {resultado}, {mensaje_arca}")
 
                     venta.tipo_comprobante = 0
@@ -975,23 +891,14 @@ def procesar_venta_ajax(request):
 
             except Exception as afip_err:
                 logger.exception(f"Excepción al conectar con ARCA/AFIP: {afip_err}")
-
-                # ============================================================
-                # EXCEPCIÓN → dejar como Documento X (no fiscal)
-                # ============================================================
                 venta.tipo_comprobante = 0
                 venta.estado = 'COMPROBANTE_X'
                 venta.cae = None
                 venta.numero_comprobante = None
                 venta.save()
-
                 error_arca = f"Error de conexión con ARCA: {afip_err}"
 
         else:
-            # ============================================================
-            # No se intentó ARCA (falta config o no era TICKET/FACTURA)
-            # Si era TICKET/FACTURA y falta config, dejar como X.
-            # ============================================================
             if accion_comprobante in ['TICKET', 'FACTURA'] and not (
                 config
                 and config.certificado_crt
@@ -1006,8 +913,19 @@ def procesar_venta_ajax(request):
                 error_arca = "No se pudo facturar: falta configuración de ARCA (certificado, clave o CUIT)."
 
         # ============================================================
-        # 11. Respuesta exitosa
-        # 🔽 8 ESPACIOS: al mismo nivel que el "config =" del paso 10
+        # 11. IMPRESIÓN AUTOMÁTICA EN COCINA (vía Flask local)
+        # ============================================================
+        resultado_cocina = None
+        if config and config.modulo_cocina:
+            try:
+                from .utils_impresion import enviar_comanda_cocina
+                resultado_cocina = enviar_comanda_cocina(venta)
+            except Exception as e:
+                logger.exception(f"Error imprimiendo comanda de cocina para venta #{venta.id}: {e}")
+                resultado_cocina = {'success': False, 'error': str(e)}
+
+        # ============================================================
+        # 12. Respuesta exitosa
         # ============================================================
         return JsonResponse({
             'status': 'warning' if error_arca else 'success',
@@ -1025,6 +943,7 @@ def procesar_venta_ajax(request):
             'error_arca': error_arca,
             'repartidor': repartidor_obj.username if repartidor_obj else None,
             'desde_remitos': desde_remitos,
+            'comanda_cocina': resultado_cocina,
         })
 
     except Exception as e:
@@ -1190,6 +1109,12 @@ def generar_ticket_texto(venta, config, ancho=48):
     lineas.append(f"Fecha: {venta.fecha.strftime('%d/%m/%Y %H:%M')}")
     lineas.append(f"Atendio: {venta.vendedor.get_full_name() if venta.vendedor else '-'}")
 
+    # 🔽 NOMBRE DE RETIRO (TAKE AWAY)
+    if venta.nombre_retiro:
+        lineas.append(linea())
+        lineas.append(center(f"*** RETIRA: {venta.nombre_retiro.upper()} ***", ancho))
+        lineas.append(linea())
+
     cliente = venta.cliente.nombre if venta.cliente else "Consumidor Final"
     lineas.append(f"Cliente: {cliente}")
 
@@ -1243,6 +1168,10 @@ def generar_ticket_texto(venta, config, ancho=48):
 
     lineas.append(linea())
     lineas.append(center("Gracias por su compra!", ancho))
+
+    # 🔽 CÓDIGO DE BARRAS (Para la precuenta/ticket)
+    # Si el Flask lo tiene activado, saldrá el código de barras. Si no, lo ignora.
+    lineas.append(f"\n[BARCODE:{venta.id:04d}]\n")
 
     # ============================================================
     # ESPACIO EN BLANCO ANTES DEL CORTE
@@ -1754,7 +1683,6 @@ def pos_view(request):
 
     # ============================================================
     # Remitos pendientes de cobro en este turno
-    # (los que quedaron sin rendir del turno anterior + los del actual)
     # ============================================================
     remitos_pendientes = Venta.objects.filter(
         turno=turno_activo,
@@ -1779,6 +1707,7 @@ def pos_view(request):
         'turno_activo': turno_activo,
         'sucursal_actual': turno_activo.sucursal,
         'condicion_iva_emisor': condicion_iva_emisor,
+        'config': config,  # 🔽 ESTA LÍNEA ES LA QUE FALTABA
         'cantidad_remitos_pendientes': cantidad_pendientes,
         'total_remitos_pendientes': total_pendientes,
         'cantidad_remitos_heredados': cantidad_heredados,
@@ -3621,6 +3550,7 @@ def facturar_venta_existente(request, venta_id):
 
 @login_required
 @solo_no_repartidor
+@transaction.atomic
 def rendir_venta(request, venta_id):
     """
     Marca una venta como RENDIDA (el repartidor volvió con la plata y el stock).
@@ -3629,13 +3559,14 @@ def rendir_venta(request, venta_id):
     if request.method != 'POST':
         return JsonResponse({'status': 'error', 'message': 'Método no permitido.'}, status=405)
 
-    if not (request.user.is_superuser or request.user.rol in ['gerente', 'cajero']):
+    # 🔽 Validación de permisos segura
+    if not (request.user.is_superuser or getattr(request.user, 'rol', '') in ['gerente', 'cajero']):
         return JsonResponse({
             'status': 'error',
             'message': 'No tenés permisos para rendir ventas.'
         }, status=403)
 
-    # 🔽 NUEVO: Validar que haya caja abierta
+    # Validar que haya caja abierta
     turno_activo = CajaTurno.objects.filter(
         vendedor=request.user,
         estado='ABIERTA',
@@ -3648,44 +3579,60 @@ def rendir_venta(request, venta_id):
         }, status=400)
 
     try:
+        # 🔽 BLINDAJE: Si la venta no existe, atrapamos el error
         venta = Venta.objects.select_for_update().get(pk=venta_id)
     except Venta.DoesNotExist:
         return JsonResponse({'status': 'error', 'message': 'Venta no encontrada.'}, status=404)
+    except Exception as e:
+        return JsonResponse({'status': 'error', 'message': f'Error buscando la venta: {str(e)}'}, status=500)
 
+    # Validar estado
     if venta.estado not in ('PENDIENTE_ENTREGA', 'ENTREGADO'):
         return JsonResponse({
             'status': 'error',
             'message': f'Esta venta está en estado "{venta.get_estado_display()}" y no se puede rendir.'
         }, status=400)
 
-    # Actualizar estado
-    estado_anterior = venta.estado
-    venta.estado = 'COMPLETADO'
-    venta.estado_cobro = 'COBRADO'
-    venta.saldo_pendiente = Decimal('0.00')
-    venta.save()
+    try:
+        # Actualizar estado
+        estado_anterior = venta.estado
+        venta.estado = 'COMPLETADO'
+        venta.estado_cobro = 'COBRADO'
+        venta.saldo_pendiente = Decimal('0.00')
+        venta.save()
 
-    # Auditoría
-    registrar_log(
-        request,
-        accion='VENTA_RENDIR',
-        descripcion=f'Venta #{venta.id} rendida por {request.user.username} en Turno #{turno_activo.id}',
-        modelo='Venta',
-        objeto_id=venta.id,
-        datos_despues={
-            'estado_anterior': estado_anterior,
-            'estado_nuevo': venta.estado,
-            'estado_cobro': venta.estado_cobro,
-            'turno': turno_activo.id,
-        },
-    )
+        # Auditoría (por si falla el registrar_log, que no rompa la rendición)
+        try:
+            registrar_log(
+                request,
+                accion='VENTA_RENDIR',
+                descripcion=f'Venta #{venta.id} rendida por {request.user.username} en Turno #{turno_activo.id}',
+                modelo='Venta',
+                objeto_id=venta.id,
+                datos_despues={
+                    'estado_anterior': estado_anterior,
+                    'estado_nuevo': venta.estado,
+                    'estado_cobro': venta.estado_cobro,
+                    'turno': turno_activo.id,
+                },
+            )
+        except Exception as log_err:
+            # Si falla el log, no detenemos la rendición
+            logger.error(f"Error guardando log de rendición: {log_err}")
 
-    return JsonResponse({
-        'status': 'success',
-        'message': 'Venta rendida correctamente.',
-        'venta_id': venta.id,
-        'estado': venta.estado,
-    })
+        return JsonResponse({
+            'status': 'success',
+            'message': 'Venta rendida correctamente.',
+            'venta_id': venta.id,
+            'estado': venta.estado,
+        })
+
+    except Exception as e:
+        logger.exception(f"Error inesperado al rendir venta #{venta_id}: {e}")
+        return JsonResponse({
+            'status': 'error',
+            'message': f'Error interno al rendir la venta: {str(e)}'
+        }, status=500)
 
 @login_required
 @solo_no_repartidor
@@ -3741,7 +3688,7 @@ def rendir_todos_repartidor(request, repartidor_id):
     if request.method != 'POST':
         return JsonResponse({'status': 'error', 'message': 'Método no permitido.'}, status=405)
 
-    if not (request.user.is_superuser or request.user.rol in ['gerente', 'cajero']):
+    if not (request.user.is_superuser or getattr(request.user, 'rol', '') in ['gerente', 'cajero']):
         return JsonResponse({
             'status': 'error',
             'message': 'No tenés permisos para rendir ventas.'
@@ -3928,3 +3875,449 @@ def repartidores_con_deuda_view(request):
         'solo_con_deuda': solo_con_deuda,
     }
     return render(request, 'ventas/repartidores_con_deuda.html', context)
+
+def generar_ticket_precuenta(venta, config, ancho=48):
+    """Genera el ticket de PRECUENTA (no fiscal)."""
+    def center(texto):
+        return str(texto).center(ancho)
+    
+    def linea(char='-'):
+        return char * ancho
+    
+    def dos_columnas(izq, der):
+        izq = str(izq)
+        der = str(der)
+        espacio = ancho - len(izq) - len(der)
+        if espacio < 1:
+            return izq + ' ' + der
+        return izq + ' ' * espacio + der
+    
+    lineas = []
+    
+    # Encabezado
+    nombre = config.nombre_fantasia or config.razon_social or "MI COMERCIO"
+    lineas.append(center(nombre.upper()))
+    lineas.append(center(f"CUIT: {config.cuit}"))
+    if config.direccion:
+        lineas.append(center(config.direccion))
+    lineas.append(linea())
+    
+    # Título PRECUENTA
+    lineas.append(center("*** PRECUENTA ***"))
+    lineas.append(center("(NO VÁLIDO COMO FACTURA)"))
+    lineas.append(linea())
+    
+    lineas.append(f"Fecha: {venta.fecha.strftime('%d/%m/%Y %H:%M')}")
+    lineas.append(f"Atendio: {venta.vendedor.get_full_name() if venta.vendedor else '-'}")
+    
+    # 🔽 NOMBRE DE RETIRO (TAKE AWAY) DESTACADO
+    if venta.nombre_retiro:
+        lineas.append(linea())
+        lineas.append(center(f"*** RETIRA: {venta.nombre_retiro.upper()} ***"))
+        lineas.append(linea())
+    
+    cliente = venta.cliente.nombre if venta.cliente else "Consumidor Final"
+    lineas.append(f"Cliente: {cliente}")
+    
+    lineas.append(linea())
+    
+    # Detalle
+    lineas.append(dos_columnas("Cant  Descripcion", "Subtotal"))
+    lineas.append(linea())
+    
+    for item in venta.detalles.all():
+        nombre_prod = item.producto.nombre[:32]
+        cant = f"{item.cantidad}x"
+        subtotal = f"${item.subtotal}"
+        lineas.append(dos_columnas(f"{cant} {nombre_prod}", subtotal))
+    
+    lineas.append(linea())
+    lineas.append(dos_columnas("TOTAL A PAGAR:", f"${venta.total}"))
+    lineas.append(linea())
+    
+    lineas.append(center("*** NO VÁLIDO COMO FACTURA ***"))
+    lineas.append(center("Este documento es solo informativo"))
+    lineas.append(center("Solicite su factura al pagar"))
+    lineas.append(linea())
+    lineas.append(center("Gracias por su visita!"))
+
+    # Código de barras para la precuenta
+    lineas.append(f"\n[BARCODE:PRE-{venta.id:04d}]\n")
+    
+    lineas.append("\n\n\n\n")
+    
+    return "\n".join(lineas)
+
+@login_required
+@solo_no_repartidor
+@csrf_exempt
+def generar_precuenta_ajax(request):
+    """
+    Genera una precuenta (sin impacto fiscal, sin descontar stock).
+    Se imprime y se guarda en la base con estado 'PRECUENTA'.
+    El cliente la puede ver antes de decidir si quiere factura o no.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'status': 'error', 'message': 'Método no permitido.'}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+        items = data.get('items', [])
+        cliente_id = data.get('cliente_id')
+        vendedor_id = data.get('vendedor_id')
+        nombre_retiro = data.get('nombre_retiro', '').strip()
+        
+        if not items:
+            return JsonResponse({'status': 'error', 'message': 'El carrito está vacío.'}, status=400)
+        
+        # Validar turno activo
+        turno_activo = CajaTurno.objects.filter(vendedor=request.user, estado='ABIERTA').first()
+        if not turno_activo:
+            return JsonResponse({'status': 'error', 'message': 'No tenés una caja abierta.'}, status=400)
+        
+        # Cargar cliente
+        cliente_obj = None
+        if cliente_id:
+            cliente_obj = Cliente.objects.filter(id=cliente_id).first()
+        
+        # Calcular totales
+        total_venta = Decimal('0.00')
+        detalles_a_crear = []
+        
+        for item in items:
+            prod_id = item.get('id')
+            cantidad = int(item.get('cantidad', 1))
+            if not prod_id:
+                return JsonResponse({'status': 'error', 'message': 'Ítem sin ID.'}, status=400)
+            
+            producto = Producto.objects.get(pk=prod_id)
+            precio = Decimal(str(producto.precio_venta))
+            subtotal = precio * cantidad
+            total_venta += subtotal
+            
+            detalles_a_crear.append({
+                'producto': producto,
+                'cantidad': cantidad,
+                'precio': precio,
+                'subtotal': subtotal,
+            })
+        
+        # Crear la Venta en estado PRECUENTA (sin stock, sin caja)
+        with transaction.atomic():
+            precuenta = Venta.objects.create(
+                turno=turno_activo,
+                sucursal=turno_activo.sucursal,
+                vendedor=request.user,
+                cliente=cliente_obj,
+                total=total_venta,
+                estado='PRECUENTA',
+                tipo_comprobante=0,  # Ticket no fiscal
+                es_remito=False,
+                estado_cobro='PENDIENTE',
+                saldo_pendiente=total_venta,
+                nombre_retiro=nombre_retiro,
+                metodo_pago='EFECTIVO',  # default, se cambia al cobrar
+            )
+            
+            for det in detalles_a_crear:
+                DetalleVenta.objects.create(
+                    venta=precuenta,
+                    producto=det['producto'],
+                    cantidad=det['cantidad'],
+                    precio_unitario=det['precio'],
+                    subtotal=det['subtotal'],
+                )
+        
+                logger.info(f"Precuenta #{precuenta.id} generada por {request.user.username} - ${total_venta}")
+
+        # ============================================================
+        # IMPRESIÓN AUTOMÁTICA DE COMANDA EN COCINA
+        # Se dispara al TOMAR el pedido (no al cobrar/facturar).
+        # ============================================================
+        resultado_cocina = None
+        config = EmpresaConfig.objects.first()
+        if config and config.modulo_cocina:
+            try:
+                from .utils_impresion import enviar_comandas_por_estacion
+                enviar_comandas_por_estacion(precuenta)
+            except Exception as e:
+                logger.exception(f"Error imprimiendo comandas: {e}")
+                resultado_cocina = {'success': False, 'error': str(e)}
+
+        return JsonResponse({
+            'status': 'success',
+            'message': 'Precuenta generada correctamente.',
+            'precuenta_id': precuenta.id,
+            'total': float(total_venta),
+            'cliente_nombre': cliente_obj.nombre if cliente_obj else 'Consumidor Final',
+            'nombre_retiro': nombre_retiro,
+            'comanda_cocina': resultado_cocina,
+        })
+    
+    except Exception as e:
+        logger.exception("Error generando precuenta")
+        return JsonResponse({'status': 'error', 'message': f'Error: {str(e)}'}, status=500)
+
+
+@login_required
+def imprimir_precuenta(request, venta_id):
+    """Renderiza la precuenta para imprimir (formato ticket)."""
+    venta = get_object_or_404(Venta, id=venta_id)
+    config = EmpresaConfig.objects.first()
+    
+    # Verificar que sea precuenta
+    if venta.estado != 'PRECUENTA':
+        messages.error(request, 'Este comprobante no es una precuenta.')
+        return redirect('ventas:pos')
+    
+    # Generar texto plano para ESC/POS
+    ticket_texto = generar_ticket_precuenta(venta, config)
+    
+    return render(
+        request,
+        "ventas/ticket_imprimible.html",
+        {
+            "venta": venta,
+            "config": config,
+            "ticket_texto": ticket_texto,
+            "es_precuenta": True,
+        },
+    )
+
+@login_required
+@solo_no_repartidor
+@csrf_exempt
+@transaction.atomic
+def cerrar_precuenta_ajax(request, venta_id):
+    """
+    Cierra una precuenta existente.
+    - con_factura=True  → Solicita CAE a ARCA. Actualiza el comprobante.
+    - con_factura=False → Documento X (sin CAE).
+    En ambos casos: descuenta stock (si no se descontó antes), 
+    mueve caja (marca como COBRADO).
+    """
+    if request.method != 'POST':
+        return JsonResponse({'status': 'error', 'message': 'Método no permitido.'}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+        con_factura = data.get('con_factura', False)
+        metodo_pago = data.get('metodo_pago', 'EFECTIVO')
+        monto_recibido = float(data.get('monto_recibido', 0))
+        tipo_comprobante_seleccionado = data.get('tipo_comprobante', None)
+        
+        try:
+            precuenta = Venta.objects.select_for_update().get(id=venta_id, estado='PRECUENTA')
+        except Venta.DoesNotExist:
+            return JsonResponse({'status': 'error', 'message': 'Precuenta no encontrada.'}, status=404)
+        
+        turno_activo = CajaTurno.objects.filter(vendedor=request.user, estado='ABIERTA').first()
+        if not turno_activo:
+            return JsonResponse({'status': 'error', 'message': 'No tenés caja abierta.'}, status=400)
+        
+        config = EmpresaConfig.objects.first()
+        condicion_emisor = config.condicion_iva if config else 'MO'
+        cliente_obj = precuenta.cliente
+        
+        total_venta = precuenta.total
+        monto_recibido_dec = Decimal(str(monto_recibido))
+        vuelto = max(Decimal('0.00'), monto_recibido_dec - total_venta)
+        
+        error_arca = None
+        
+        if con_factura:
+            # ============================================================
+            # FLUJO CON FACTURA
+            # ============================================================
+            if not (config and config.certificado_crt and config.clave_privada_key and config.cuit):
+                return JsonResponse({
+                    'status': 'error',
+                    'message': 'Falta configuración de ARCA.'
+                }, status=400)
+            
+            if condicion_emisor == 'MO':
+                tipo_comprobante_final = 11
+                discrimina_iva = False
+            elif condicion_emisor == 'RI':
+                if cliente_obj and cliente_obj.condicion_iva == '1':
+                    tipo_comprobante_final = 1
+                else:
+                    tipo_comprobante_final = 6
+                discrimina_iva = True
+            else:
+                tipo_comprobante_final = 11
+                discrimina_iva = False
+            
+            if tipo_comprobante_seleccionado:
+                tipo_comprobante_final = int(tipo_comprobante_seleccionado)
+                discrimina_iva = tipo_comprobante_final in [1, 6]
+            
+            if discrimina_iva and config:
+                alicuota = Decimal(str(config.alicuota_iva_default)) / Decimal('100')
+                imp_neto = (total_venta / (Decimal('1') + alicuota)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                imp_iva = (total_venta - imp_neto).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            else:
+                imp_neto = total_venta
+                imp_iva = Decimal('0.00')
+            
+            try:
+                from pyafipws.wsaa import WSAA
+                from pyafipws.wsfev1 import WSFEv1
+                
+                cert_path = config.certificado_crt.path
+                key_path = config.clave_privada_key.path
+                cuit = config.cuit.replace("-", "").strip()
+                
+                if config.ambiente_arca == 'PROD':
+                    wsdl_wsaa = "https://wsaa.afip.gov.ar/ws/services/LoginCms"
+                    wsdl_wsfe = "https://servicios1.afip.gov.ar/wsfev1/service.asmx?WSDL"
+                else:
+                    wsdl_wsaa = "https://wsaahomo.afip.gov.ar/ws/services/LoginCms"
+                    wsdl_wsfe = "https://wswhomo.afip.gov.ar/wsfev1/service.asmx?WSDL"
+                
+                wsaa = WSAA()
+                ta = wsaa.Autenticar("wsfe", cert_path, key_path, wsdl=wsdl_wsaa)
+                
+                wsfev1 = WSFEv1()
+                wsfev1.Cuit = cuit
+                wsfev1.SetTicketAcceso(ta)
+                
+                CACHE_DIR = os.path.join(settings.BASE_DIR, 'afip_cache')
+                os.makedirs(CACHE_DIR, exist_ok=True)
+                wsfev1.Conectar(wsdl=wsdl_wsfe, cache=CACHE_DIR)
+                
+                pto_vta = int(config.punto_de_venta or 1)
+                cbte_nro = int(wsfev1.CompUltimoAutorizado(tipo_comprobante_final, pto_vta) or 0) + 1
+                
+                doc_tipo = 99
+                doc_nro = 0
+                if cliente_obj and cliente_obj.numero_documento:
+                    doc_limpio = cliente_obj.numero_documento.replace("-", "").strip()
+                    if doc_limpio and doc_limpio != "0" * len(doc_limpio):
+                        doc_nro = doc_limpio
+                        if len(doc_nro) == 11:
+                            doc_tipo = 80
+                        elif len(doc_nro) == 8:
+                            doc_tipo = 96
+                        else:
+                            doc_tipo = 99
+                            doc_nro = 0
+                
+                fecha_cbte = timezone.now().strftime("%Y%m%d")
+                
+                cond_iva_receptor = 5
+                if cliente_obj and cliente_obj.condicion_iva:
+                    try:
+                        cond_iva_receptor = int(cliente_obj.condicion_iva)
+                    except (ValueError, TypeError):
+                        cond_iva_receptor = 5
+                
+                wsfev1.CrearFactura(
+                    concepto=1,
+                    tipo_doc=doc_tipo,
+                    nro_doc=doc_nro,
+                    tipo_cbte=tipo_comprobante_final,
+                    punto_vta=pto_vta,
+                    cbt_desde=cbte_nro,
+                    cbt_hasta=cbte_nro,
+                    imp_total=float(total_venta),
+                    imp_tot_conc=0.0,
+                    imp_neto=float(imp_neto),
+                    imp_iva=float(imp_iva),
+                    imp_trib=0.0,
+                    imp_op_ex=0.0,
+                    fecha_cbte=fecha_cbte,
+                )
+                
+                try:
+                    wsfev1.EstablecerCampoFactura("condicion_iva_receptor_id", str(cond_iva_receptor))
+                except Exception:
+                    pass
+                
+                if tipo_comprobante_final != 11:
+                    wsfev1.AgregarIva(5, float(imp_neto), float(imp_iva))
+                
+                wsfev1.CAESolicitar()
+                
+                cae_obtenido = getattr(wsfev1, "CAE", None)
+                vencimiento_obtenido = getattr(wsfev1, "Vencimiento", None)
+                
+                if cae_obtenido:
+                    precuenta.cae = str(cae_obtenido)
+                    if vencimiento_obtenido:
+                        try:
+                            precuenta.vencimiento_cae = datetime.strptime(str(vencimiento_obtenido), "%Y%m%d").date()
+                        except ValueError:
+                            pass
+                    precuenta.numero_comprobante = cbte_nro
+                    precuenta.tipo_comprobante = tipo_comprobante_final
+                    precuenta.estado = 'COMPLETADO'
+                    precuenta.subtotal_neto = imp_neto
+                    precuenta.iva_total = imp_iva
+                    precuenta.alicuota_iva = config.alicuota_iva_default if discrimina_iva else Decimal('0.00')
+                    precuenta.discrimina_iva = discrimina_iva
+                else:
+                    precuenta.tipo_comprobante = 0
+                    precuenta.estado = 'COMPROBANTE_X'
+                    error_arca = getattr(wsfev1, "ErrMsg", None) or "ARCA no devolvió CAE"
+                    
+            except Exception as afip_err:
+                logger.exception(f"Error ARCA al cerrar precuenta: {afip_err}")
+                precuenta.tipo_comprobante = 0
+                precuenta.estado = 'COMPROBANTE_X'
+                error_arca = f"Error de conexión con ARCA: {str(afip_err)}"
+        else:
+            # ============================================================
+            # FLUJO SIN FACTURA (Documento X)
+            # ============================================================
+            precuenta.tipo_comprobante = 0
+            precuenta.estado = 'COMPLETADO'
+        
+        # Actualizar datos de la venta (NO se vuelve a tocar stock si ya se hizo)
+        precuenta.metodo_pago = metodo_pago
+        precuenta.monto_recibido = monto_recibido_dec
+        precuenta.vuelto = vuelto
+        precuenta.estado_cobro = 'COBRADO'
+        precuenta.saldo_pendiente = Decimal('0.00')
+        precuenta.save()
+        
+        registrar_log(
+            request,
+            accion='VENTA',
+            descripcion=(
+                f'Precuenta #{precuenta.id} cerrada - '
+                f'{"Con Factura" if con_factura else "Sin Factura"} - ${total_venta}'
+            ),
+            modelo='Venta',
+            objeto_id=precuenta.id,
+            datos_despues={
+                'total': float(total_venta),
+                'metodo_pago': metodo_pago,
+                'con_factura': con_factura,
+                'estado': precuenta.estado,
+                'cae': precuenta.cae,
+            },
+        )
+        
+        resultado_cocina = None
+        
+        return JsonResponse({
+            'status': 'warning' if error_arca else 'success',
+            'message': (
+                'La venta se guardó como Documento X (ARCA rechazó el CAE).'
+                if error_arca
+                else ('Venta facturada correctamente.' if con_factura else 'Venta cerrada sin factura.')
+            ),
+            'venta_id': precuenta.id,
+            'estado': precuenta.estado,
+            'estado_display': precuenta.get_estado_display(),
+            'total': float(total_venta),
+            'vuelto': float(vuelto),
+            'cae': precuenta.cae if precuenta.cae else None,
+            'error_arca': error_arca,
+            'con_factura': con_factura,
+        })
+    
+    except Exception as e:
+        logger.exception("Error cerrando precuenta")
+        return JsonResponse({'status': 'error', 'message': f'Error: {str(e)}'}, status=500)

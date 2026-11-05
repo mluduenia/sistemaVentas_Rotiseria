@@ -160,6 +160,75 @@
                                 </div>
                             </div>
 
+                            <!-- 🔽 MÓDULO DE COCINA / TAKE AWAY -->
+                            <div class="col-md-12">
+                                <div class="border rounded p-3 h-100 border-success border-2">
+                                    <div class="d-flex align-items-start gap-3">
+                                        <div class="form-check form-switch m-0 mt-1">
+                                            <input class="form-check-input" type="checkbox" role="switch"
+                                                   name="modulo_cocina" id="mod_cocina"
+                                                   {% if config.modulo_cocina %}checked{% endif %}>
+                                        </div>
+                                        <div class="flex-grow-1">
+                                            <label class="fw-bold d-block mb-1" for="mod_cocina">
+                                                👨‍🍳 Cocina / Take Away
+                                            </label>
+                                            <small class="text-muted">
+                                                Imprime comandas automáticamente en la cocina al cobrar un pedido.
+                                            </small>
+                                        </div>
+                                    </div>
+
+                                    <!-- 🔽 CAMPOS DE ESTACIÓN (se ocultan si el módulo está apagado) -->
+                                    <div class="row g-2 mt-2 ms-4" id="config-impresora-cocina">
+                                        <div class="col-md-12">
+                                            <label class="small fw-bold text-secondary">Estación de Impresión (Flask)</label>
+                                            <input type="text" name="estacion_cocina" class="form-control form-control-sm" 
+                                                   value="{{ config.estacion_cocina|default:'comanda' }}" 
+                                                   placeholder="Ej: cocina1, bebidas, comanda">
+                                            <small class="text-muted">El nombre debe coincidir con el configurado en la UI de Flask.</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 🔽 MÓDULO KDS (PANTALLA COCINA) -->
+                            <div class="col-md-12">
+                                <div class="border rounded p-3 h-100 border-info border-2">
+                                    <div class="d-flex align-items-start gap-3">
+                                        <div class="form-check form-switch m-0 mt-1">
+                                            <input class="form-check-input" type="checkbox" role="switch"
+                                                   name="modulo_kds" id="mod_kds"
+                                                   {% if config.modulo_kds %}checked{% endif %}>
+                                        </div>
+                                        <div class="flex-grow-1">
+                                            <label class="fw-bold d-block mb-1" for="mod_kds">
+                                                📺 KDS (Pantalla Cocina)
+                                            </label>
+                                            <small class="text-muted">
+                                                Pantalla con semáforo de tiempos y escaneo de códigos de barras.
+                                            </small>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Configuración de tolerancias (se oculta si no está activo) -->
+                                    <div class="row g-2 mt-2 ms-4" id="config-kds">
+                                        <div class="col-md-6">
+                                            <label class="small fw-bold text-secondary">Minutos en Amarillo (Normal)</label>
+                                            <input type="number" name="kds_minutos_amarillo" class="form-control form-control-sm" 
+                                                   value="{{ config.kds_minutos_amarillo|default:10 }}" min="1">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="small fw-bold text-secondary">Minutos en Naranja (Demorado)</label>
+                                            <input type="number" name="kds_minutos_naranja" class="form-control form-control-sm" 
+                                                   value="{{ config.kds_minutos_naranja|default:20 }}" min="1">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+
                         <div class="d-flex justify-content-end gap-2 border-top pt-3">
                             <a href="{% url 'configuracion:configuracion_general' %}" class="btn btn-secondary px-4">
                                 Cancelar
@@ -188,20 +257,53 @@ document.addEventListener('DOMContentLoaded', function () {
         deposito: document.getElementById('mod_dep'),
         cuenta_corriente: document.getElementById('mod_cc'),
         multi_sucursal: document.getElementById('mod_multi'),
+        cocina: document.getElementById('mod_cocina'),
+        kds: document.getElementById('mod_kds'),
     };
 
+    const configKds = document.getElementById('config-kds');
+    const configImpresora = document.getElementById('config-impresora-cocina');
+
+    function toggleConfigKds() {
+        if (!checkboxes.kds || !configKds) return;
+        if (checkboxes.kds.checked) {
+            configKds.style.display = 'flex';
+            configKds.style.opacity = '1';
+        } else {
+            configKds.style.display = 'none';
+        }
+    }
+
+    function toggleConfigImpresora() {
+        if (!checkboxes.cocina || !configImpresora) return;
+        if (checkboxes.cocina.checked) {
+            configImpresora.style.display = 'flex';
+            configImpresora.style.opacity = '1';
+        } else {
+            configImpresora.style.display = 'none';
+        }
+    }
+
+    // Ejecutar al cargar
+    toggleConfigKds();
+    toggleConfigImpresora();
+
+    // Presets actualizados
     const PRESETS = {
         'LOCAL': {
             punto_venta: true, preventa: false, reparto: false,
             deposito: false, cuenta_corriente: true, multi_sucursal: false,
+            cocina: false, kds: false,
         },
         'LOCAL_REPARTO': {
             punto_venta: true, preventa: true, reparto: true,
             deposito: true, cuenta_corriente: true, multi_sucursal: false,
+            cocina: false, kds: false,
         },
         'SOLO_REPARTO': {
             punto_venta: false, preventa: true, reparto: true,
             deposito: true, cuenta_corriente: true, multi_sucursal: false,
+            cocina: false, kds: false,
         },
     };
 
@@ -215,12 +317,16 @@ document.addEventListener('DOMContentLoaded', function () {
                 checkboxes[key].checked = preset[key];
             }
         });
+        toggleConfigKds();
+        toggleConfigImpresora();
     });
 
     Object.values(checkboxes).forEach(function (chk) {
         if (!chk) return;
         chk.addEventListener('change', function () {
             select.value = 'CUSTOM';
+            toggleConfigKds();
+            toggleConfigImpresora();
         });
     });
 });

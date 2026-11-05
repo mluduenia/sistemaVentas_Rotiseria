@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+
+{% block title %}{% if impresora %}Editar{% else %}Nueva{% endif %} Impresora{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <div class="row justify-content-center">
+        <div class="col-12 col-md-8 col-lg-6">
+
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-primary text-white py-3">
+                    <h4 class="mb-0 fw-bold">
+                        <i class="fas fa-print me-2"></i>
+                        {% if impresora %}Editar Impresora{% else %}Nueva Impresora{% endif %}
+                    </h4>
+                </div>
+                <div class="card-body p-4">
+
+                    <form method="POST">
+                        {% csrf_token %}
+
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Nombre visible <span class="text-danger">*</span></label>
+                            <input type="text" name="nombre" class="form-control"
+                                   value="{% if impresora %}{{ impresora.nombre }}{% elif form_data.nombre %}{{ form_data.nombre }}{% endif %}"
+                                   placeholder="Ej: Cocina Principal">
+                            <small class="text-muted">Lo que verá el cajero en el selector.</small>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Clave de Estación (Flask) <span class="text-danger">*</span></label>
+                            <input type="text" name="clave_estacion" class="form-control"
+                                   value="{% if impresora %}{{ impresora.clave_estacion }}{% elif form_data.clave_estacion %}{{ form_data.clave_estacion }}{% endif %}"
+                                   placeholder="Ej: cocina1, bebidas, comanda">
+                            <small class="text-muted">Debe coincidir exactamente con la UI del servicio de impresión.</small>
+                        </div>
+
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" name="activa" id="id_activa"
+                                   {% if impresora %}{% if impresora.activa %}checked{% endif %}{% elif form_data.activa %}checked{% endif %}>
+                            <label class="form-check-label" for="id_activa">Activa</label>
+                        </div>
+
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" name="es_por_defecto" id="id_default"
+                                   {% if impresora %}{% if impresora.es_por_defecto %}checked{% endif %}{% elif form_data.es_por_defecto %}checked{% endif %}>
+                            <label class="form-check-label" for="id_default">Es la impresora por defecto</label>
+                        </div>
+
+                        <div class="d-flex justify-content-end gap-2 border-top pt-3">
+                            <a href="{% url 'configuracion:lista_impresoras' %}" class="btn btn-secondary px-4">Cancelar</a>
+                            <button type="submit" class="btn btn-primary px-4 fw-bold">
+                                <i class="fas fa-save me-1"></i> Guardar
+                            </button>
+                        </div>
+                    </form>
+
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+{% endblock %}

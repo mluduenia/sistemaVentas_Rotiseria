@@ -17,5 +17,9 @@ urlpatterns = [
     path('reset-dev/ejecutar/', views.ejecutar_reset_dev_view, name='ejecutar_reset_dev'),
     path('auditoria/', views.auditoria_view, name='auditoria'),
     path('auditoria/<int:log_id>/', views.auditoria_detalle_view, name='auditoria_detalle'),
+    path('impresoras/', views.lista_impresoras_view, name='lista_impresoras'),
+    path('impresoras/crear/', views.crear_impresora_view, name='crear_impresora'),
+    path('impresoras/<int:impresora_id>/editar/', views.editar_impresora_view, name='editar_impresora'),
+    path('impresoras/<int:impresora_id>/eliminar/', views.eliminar_impresora_view, name='eliminar_impresora'),
     
 ]

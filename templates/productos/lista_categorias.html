@@ -18,7 +18,9 @@
                     <tr>
                         <th style="width: 80px;">#ID</th>
                         <th>Nombre del Rubro / Categoría</th>
+                        <th>Estación de Impresión</th>
                         <th>Descripción</th>
+                        <th style="width: 100px;" class="text-end">Acciones</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -26,11 +28,27 @@
                     <tr>
                         <td><code>#{{ cat.id }}</code></td>
                         <td><strong>{{ cat.nombre }}</strong></td>
+                        <td>
+                            {% if cat.estacion_impresion == 'comanda' %}
+                                <span class="badge bg-primary">Cocina General</span>
+                            {% elif cat.estacion_impresion == 'bebidas' %}
+                                <span class="badge bg-info text-dark">Barra / Bebidas</span>
+                            {% elif cat.estacion_impresion == 'postres' %}
+                                <span class="badge bg-warning text-dark">Postres / Heladería</span>
+                            {% else %}
+                                <span class="badge bg-secondary">No imprimir comanda</span>
+                            {% endif %}
+                        </td>
                         <td>{{ cat.descripcion|default:"Sin descripción" }}</td>
+                        <td class="text-end">
+                            <a href="{% url 'productos:editar_categoria' cat.id %}" class="btn btn-sm btn-outline-primary" title="Editar">
+                                <i class="fas fa-edit"></i>
+                            </a>
+                        </td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="3" class="text-center text-muted py-5">
+                        <td colspan="5" class="text-center text-muted py-5">
                             <i class="fas fa-tags fa-3x mb-3 d-block opacity-50"></i>
                             No hay categorías registradas en el sistema.
                         </td>

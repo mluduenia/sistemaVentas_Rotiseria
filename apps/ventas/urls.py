@@ -44,4 +44,8 @@ urlpatterns = [
     path('repartidores/<int:repartidor_id>/pendientes/', views.repartidor_pendientes_view, name='repartidor_pendientes'),
     path('repartidores/<int:repartidor_id>/rendir-todos/', views.rendir_todos_repartidor, name='rendir_todos_repartidor'),
     path('repartidores-con-deuda/', views.repartidores_con_deuda_view, name='repartidores_con_deuda'),
+    path('precuenta/ajax/', views.generar_precuenta_ajax, name='generar_precuenta_ajax'),
+    path('precuenta/cerrar/<int:venta_id>/', views.cerrar_precuenta_ajax, name='cerrar_precuenta_ajax'),
+    path('precuenta/<int:venta_id>/', views.imprimir_precuenta, name='imprimir_precuenta'),
+    
 ]

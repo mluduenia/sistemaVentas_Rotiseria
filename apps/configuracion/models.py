@@ -32,7 +32,6 @@ class EmpresaConfig(models.Model):
     nombre_fantasia = models.CharField(max_length=200, blank=True, null=True, default='Mi Negocio')
     cuit = models.CharField(max_length=20, default='20-12345678-9')
 
-    # 🔽 Condición IVA del emisor
     condicion_iva = models.CharField(
         "Condición IVA del Emisor",
         max_length=5,
@@ -41,7 +40,6 @@ class EmpresaConfig(models.Model):
         help_text='Determina qué tipos de comprobante puede emitir el sistema.'
     )
 
-    # 🔽 Alícuota de IVA por defecto
     alicuota_iva_default = models.DecimalField(
         "Alícuota IVA por Defecto (%)",
         max_digits=5,
@@ -115,6 +113,46 @@ class EmpresaConfig(models.Model):
         help_text="Habilita la gestión de múltiples sucursales."
     )
 
+    # ============================================================
+    # MÓDULO COCINA / TAKE AWAY
+    # ============================================================
+    modulo_cocina = models.BooleanField(
+        "Módulo Cocina / Take Away",
+        default=False,
+        help_text="Habilita la impresión de comandas en cocina y el seguimiento de pedidos."
+    )
+    impresora_cocina_ip = models.CharField(
+        "IP de Impresora de Cocina",
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text="Ej: 192.168.1.100 (dejar vacío si no se usa impresora en red)"
+    )
+    impresora_cocina_puerto = models.IntegerField(
+        "Puerto de Impresora de Cocina",
+        default=9100,
+        help_text="Puerto por defecto para impresoras térmicas en red: 9100"
+    )
+
+    # ============================================================
+    # 🔽 NUEVO: MÓDULO KDS (KITCHEN DISPLAY SYSTEM)
+    # ============================================================
+    modulo_kds = models.BooleanField(
+        "Módulo KDS (Pantalla Cocina)",
+        default=False,
+        help_text="Habilita la pantalla de cocina con semáforo de tiempos y escaneo de códigos de barras."
+    )
+    kds_minutos_amarillo = models.IntegerField(
+        "KDS: Minutos en Amarillo (Normal)",
+        default=10,
+        help_text="Minutos antes de ponerse naranja (demorado)."
+    )
+    kds_minutos_naranja = models.IntegerField(
+        "KDS: Minutos en Naranja (Demorado)",
+        default=20,
+        help_text="Minutos antes de ponerse rojo (crítico)."
+    )
+
     class Meta:
         verbose_name = 'Configuración de Empresa'
         verbose_name_plural = 'Configuraciones de Empresa'
@@ -155,6 +193,8 @@ class EmpresaConfig(models.Model):
             self.modulo_deposito = False
             self.modulo_cuenta_corriente = True
             self.modulo_multi_sucursal = False
+            self.modulo_cocina = False
+            self.modulo_kds = False
         elif modo == 'LOCAL_REPARTO':
             self.modulo_punto_venta = True
             self.modulo_preventa = True
@@ -162,6 +202,8 @@ class EmpresaConfig(models.Model):
             self.modulo_deposito = True
             self.modulo_cuenta_corriente = True
             self.modulo_multi_sucursal = False
+            self.modulo_cocina = False
+            self.modulo_kds = False
         elif modo == 'SOLO_REPARTO':
             self.modulo_punto_venta = False
             self.modulo_preventa = True
@@ -169,6 +211,8 @@ class EmpresaConfig(models.Model):
             self.modulo_deposito = True
             self.modulo_cuenta_corriente = True
             self.modulo_multi_sucursal = False
+            self.modulo_cocina = False
+            self.modulo_kds = False
         else:
             # CUSTOM → no se toca nada
             return False
@@ -256,6 +300,71 @@ class Sucursal(models.Model):
     def es_central_bool(self):
         """Alias por compatibilidad."""
         return self.es_central
+
+
+# =========================================================
+# 🔽 NUEVO: IMPRESORA DE COCINA (MÚLTIPLES ESTACIONES)
+# =========================================================
+
+class ImpresoraCocina(models.Model):
+    """
+    Define una impresora de cocina/estación.
+    Cada impresora recibe los productos de ciertas categorías.
+    """
+
+    TIPO_ESTACION_CHOICES = (
+        ('COCINA', 'Cocina General'),
+        ('BEBIDAS', 'Barra / Bebidas'),
+        ('POSTRES', 'Postres / Helados'),
+        ('DESPACHO', 'Despacho / Retiro'),
+        ('OTRA', 'Otra Estación'),
+    )
+
+    nombre = models.CharField(
+        "Nombre de la Estación",
+        max_length=100,
+        help_text="Ej: Cocina Principal, Barra de Bebidas, Postres"
+    )
+    tipo_estacion = models.CharField(
+        "Tipo de Estación",
+        max_length=20,
+        choices=TIPO_ESTACION_CHOICES,
+        default='COCINA'
+    )
+    ip = models.CharField(
+        "IP de la Impresora",
+        max_length=50,
+        help_text="Ej: 192.168.1.100"
+    )
+    puerto = models.IntegerField(
+        "Puerto",
+        default=9100
+    )
+    activa = models.BooleanField(
+        "Activa",
+        default=True
+    )
+    imprimir_siempre = models.BooleanField(
+        "Imprimir Todas las Comandas",
+        default=False,
+        help_text="Si está activo, esta impresora recibe TODAS las comandas (útil para la cocina principal)."
+    )
+
+    # Categorías de productos que van a esta impresora
+    categorias = models.ManyToManyField(
+        'productos.Categoria',
+        blank=True,
+        related_name='impresoras',
+        help_text="Categorías de productos que se imprimen en esta impresora."
+    )
+
+    class Meta:
+        verbose_name = "Impresora de Cocina"
+        verbose_name_plural = "Impresoras de Cocina"
+        ordering = ['tipo_estacion', 'nombre']
+
+    def __str__(self):
+        return f"{self.nombre} ({self.get_tipo_estacion_display()}) - {self.ip}:{self.puerto}"
 
 
 # =========================================================
@@ -372,3 +481,48 @@ class AuditLog(models.Model):
             'ERROR': 'fa-bug text-danger',
             'ACCESO_DENEGADO': 'fa-shield-alt text-warning',
         }.get(self.accion, 'fa-circle text-secondary')
+
+class Impresora(models.Model):
+    """
+    Estaciones de impresión configuradas.
+    Cada una tiene un nombre clave que debe coincidir con la UI del Flask.
+    """
+    nombre = models.CharField(
+        "Nombre visible",
+        max_length=100,
+        help_text="Ej: Cocina Principal, Barra de Bebidas"
+    )
+    clave_estacion = models.CharField(
+        "Clave de Estación (Flask)",
+        max_length=50,
+        unique=True,
+        help_text="Debe coincidir exactamente con el nombre en la UI del servicio de impresión (ej: cocina1, bebidas, comanda)"
+    )
+    activa = models.BooleanField(
+        "Activa",
+        default=True
+    )
+    es_por_defecto = models.BooleanField(
+        "Es por Defecto",
+        default=False,
+        help_text="Si está marcada, se usa cuando no se selecciona una específica."
+    )
+    fecha_alta = models.DateTimeField(
+        "Fecha de Alta",
+        auto_now_add=True,
+        null=True
+    )
+
+    class Meta:
+        verbose_name = "Impresora"
+        verbose_name_plural = "Impresoras"
+        ordering = ['-es_por_defecto', 'nombre']
+
+    def __str__(self):
+        return f"{self.nombre} ({self.clave_estacion})"
+
+    def save(self, *args, **kwargs):
+        # Si esta se marca como por defecto, desmarcar las demás
+        if self.es_por_defecto:
+            Impresora.objects.filter(es_por_defecto=True).exclude(pk=self.pk).update(es_por_defecto=False)
+        super().save(*args, **kwargs)

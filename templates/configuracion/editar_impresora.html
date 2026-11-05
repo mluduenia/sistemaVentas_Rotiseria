@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+
+{% block title %}Editar Impresora{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <div class="row justify-content-center">
+        <div class="col-12 col-md-8 col-lg-6">
+
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-primary text-white py-3">
+                    <h4 class="mb-0 fw-bold">
+                        <i class="fas fa-edit me-2"></i>
+                        Editar Impresora
+                    </h4>
+                </div>
+                <div class="card-body p-4">
+
+                    <form method="POST">
+                        {% csrf_token %}
+
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Nombre visible <span class="text-danger">*</span></label>
+                            <input type="text" name="nombre" class="form-control"
+                                   value="{{ impresora.nombre }}"
+                                   placeholder="Ej: Cocina Principal">
+                            <small class="text-muted">Lo que verá el cajero en el selector.</small>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Clave de Estación (Flask) <span class="text-danger">*</span></label>
+                            <input type="text" name="clave_estacion" class="form-control"
+                                   value="{{ impresora.clave_estacion }}"
+                                   placeholder="Ej: POS_Cocina, cocina1, bebidas">
+                            <small class="text-muted">
+                                Debe ser el <strong>nombre exacto</strong> de la impresora en Windows
+                                (Panel de Control → Dispositivos e impresoras), o la clave de estación
+                                configurada en el servicio de impresión Flask.
+                            </small>
+                        </div>
+
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" name="activa" id="id_activa"
+                                   {% if impresora.activa %}checked{% endif %}>
+                            <label class="form-check-label" for="id_activa">Activa</label>
+                        </div>
+
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" name="es_por_defecto" id="id_default"
+                                   {% if impresora.es_por_defecto %}checked{% endif %}>
+                            <label class="form-check-label" for="id_default">Es la impresora por defecto</label>
+                            <small class="text-muted d-block">
+                                Solo una impresora puede ser la de por defecto. Si marcás esta, se desmarca la anterior.
+                            </small>
+                        </div>
+
+                        <div class="d-flex justify-content-end gap-2 border-top pt-3">
+                            <a href="{% url 'configuracion:lista_impresoras' %}" class="btn btn-secondary px-4">Cancelar</a>
+                            <button type="submit" class="btn btn-primary px-4 fw-bold">
+                                <i class="fas fa-save me-1"></i> Guardar cambios
+                            </button>
+                        </div>
+                    </form>
+
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+{% endblock %}

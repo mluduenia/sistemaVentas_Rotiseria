@@ -1,0 +1,100 @@
+{% extends 'base.html' %}
+
+{% block title %}Impresoras Configuradas{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <div class="row justify-content-center">
+        <div class="col-12 col-lg-10">
+
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="alert alert-{{ message.tags|default:'info' }} alert-dismissible fade show">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-body py-3 border-bottom d-flex justify-content-between align-items-center">
+                    <h4 class="fw-bold mb-0">
+                        <i class="fas fa-print text-primary me-2"></i>
+                        Impresoras Configuradas
+                    </h4>
+                    <a href="{% url 'configuracion:crear_impresora' %}" class="btn btn-success fw-bold">
+                        <i class="fas fa-plus me-1"></i> Nueva Impresora
+                    </a>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table align-middle mb-0">
+                            <thead class="bg-body-tertiary">
+                                <tr>
+                                    <th class="ps-3">Nombre</th>
+                                    <th>Clave (Flask)</th>
+                                    <th class="text-center">Por Defecto</th>
+                                    <th class="text-center">Estado</th>
+                                    <th class="text-end pe-3">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for imp in impresoras %}
+                                <tr>
+                                    <td class="ps-3">
+                                        <strong>{{ imp.nombre }}</strong>
+                                    </td>
+                                    <td>
+                                        <code>{{ imp.clave_estacion }}</code>
+                                    </td>
+                                    <td class="text-center">
+                                        {% if imp.es_por_defecto %}
+                                            <span class="badge bg-primary">Default</span>
+                                        {% else %}
+                                            <span class="text-muted">—</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-center">
+                                        {% if imp.activa %}
+                                            <span class="badge bg-success">Activa</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">Inactiva</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end pe-3">
+                                        <a href="{% url 'configuracion:editar_impresora' imp.id %}" class="btn btn-sm btn-outline-primary" title="Editar">
+                                            <i class="fas fa-edit"></i>
+                                        </a>
+                                        {% if not imp.es_por_defecto %}
+                                        <form method="POST" action="{% url 'configuracion:eliminar_impresora' imp.id %}" class="d-inline"
+                                              onsubmit="return confirm('¿Eliminar la impresora {{ imp.nombre }}?');">
+                                            {% csrf_token %}
+                                            <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </form>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="5" class="text-center py-5 text-muted">
+                                        <i class="fas fa-print fa-3x mb-3 opacity-25 d-block"></i>
+                                        No hay impresoras configuradas todavía.
+                                        <br>
+                                        <a href="{% url 'configuracion:crear_impresora' %}" class="btn btn-sm btn-primary mt-2">
+                                            Crear la primera
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -4,6 +4,15 @@ from django.db import models
 class Categoria(models.Model):
     nombre = models.CharField(max_length=100)
     descripcion = models.TextField(blank=True, null=True)
+    
+    # 🔽 NUEVO: Enrutamiento dinámico de impresión
+    estacion_impresion = models.CharField(
+        "Impresora de Comanda",
+        max_length=50, # Aumentamos a 50 por si la clave es larga
+        blank=True,
+        null=True,
+        help_text="Clave de la impresora a la que va este rubro (se elige del listado)."
+    )
 
     class Meta:
         verbose_name = 'Categoría'
@@ -50,13 +59,8 @@ class Producto(models.Model):
         default=True,
         help_text='Si está marcado, el precio de venta ya incluye IVA.'
     )
-    class Meta:
-        verbose_name = 'Producto'
-        verbose_name_plural = 'Productos'
-
-    def __str__(self):
-        return f"{self.nombre} ({self.codigo_barra})"
-        # --- NUEVO: Control de Lotes y Vencimientos ---
+    
+    # --- Control de Lotes y Vencimientos ---
     maneja_lotes = models.BooleanField(
         default=False, 
         help_text="Si está tildado, este producto requiere control de lotes y vencimientos."
@@ -73,6 +77,14 @@ class Producto(models.Model):
         max_length=10, choices=METODO_SALIDA_CHOICES, default='FIFO',
         help_text="Criterio para descontar stock al vender."
     )
+
+    class Meta:
+        verbose_name = 'Producto'
+        verbose_name_plural = 'Productos'
+
+    def __str__(self):
+        return f"{self.nombre} ({self.codigo_barra})"
+
 
 # =========================================================
 # LOTES Y VENCIMIENTOS
@@ -123,8 +135,6 @@ class MovimientoStock(models.Model):
         Lote, on_delete=models.SET_NULL, null=True, blank=True, 
         related_name='movimientos', help_text="Lote asociado a este movimiento"
     )
-
-    # 🔽 NUEVO: Sucursal donde se hizo el movimiento
     sucursal = models.ForeignKey(
         'configuracion.Sucursal',
         on_delete=models.PROTECT,
@@ -133,7 +143,6 @@ class MovimientoStock(models.Model):
         null=True, blank=True,
         help_text="Sucursal donde se registra este movimiento"
     )
-
     tipo = models.CharField(max_length=10, choices=TIPO_CHOICES)
     cantidad = models.IntegerField()
     fecha = models.DateTimeField(auto_now_add=True)
@@ -175,14 +184,10 @@ class ListaPrecio(models.Model):
 class PrecioProducto(models.Model):
     """Precio de un producto en una lista específica."""
     producto = models.ForeignKey(
-        Producto,
-        on_delete=models.CASCADE,
-        related_name='precios_lista'
+        Producto, on_delete=models.CASCADE, related_name='precios_lista'
     )
     lista_precio = models.ForeignKey(
-        ListaPrecio,
-        on_delete=models.CASCADE,
-        related_name='precios_productos'
+        ListaPrecio, on_delete=models.CASCADE, related_name='precios_productos'
     )
     precio = models.DecimalField("Precio", max_digits=12, decimal_places=2)
     fecha_actualizacion = models.DateTimeField("Última Actualización", auto_now=True)
@@ -204,14 +209,10 @@ class PrecioProducto(models.Model):
 class StockSucursal(models.Model):
     """Stock de un producto en una sucursal específica."""
     producto = models.ForeignKey(
-        Producto,
-        on_delete=models.CASCADE,
-        related_name='stocks_sucursal'
+        Producto, on_delete=models.CASCADE, related_name='stocks_sucursal'
     )
     sucursal = models.ForeignKey(
-        'configuracion.Sucursal',
-        on_delete=models.CASCADE,
-        related_name='stocks'
+        'configuracion.Sucursal', on_delete=models.CASCADE, related_name='stocks'
     )
     cantidad = models.IntegerField("Cantidad", default=0)
     stock_minimo = models.IntegerField("Stock Mínimo", default=5)
@@ -228,6 +229,4 @@ class StockSucursal(models.Model):
 
     @property
     def necesita_reposicion(self):
-        """True si el stock está por debajo del mínimo."""
         return self.cantidad <= self.stock_minimo
-

@@ -325,14 +325,17 @@ class Venta(models.Model):
     )
 
     ESTADOS_VENTA = (
-        ("PRESUPUESTO", "Presupuesto / Cotización"),
-        ("PENDIENTE_ENTREGA", "Pendiente de Entrega (En Camino)"),
-        ("REMITO_CALLE", "Remito emitido en Calle"),
-        ("ENTREGADO", "Entregado (Pendiente de Rendición)"),
-        ("POSPUESTO", "Pospuesto / No Entregado"),
-        ("COMPLETADO", "Completado y Cobrado"),
-        ("CANCELADO", "Cancelado"),
-    )
+    ("PRECUENTA", "Precuenta (No Fiscal)"),
+    ("PRESUPUESTO", "Presupuesto / Cotización"),
+    ("PENDIENTE_ENTREGA", "Pendiente de Entrega (En Camino)"),
+    ("REMITO_CALLE", "Remito emitido en Calle"),
+    ("ENTREGADO", "Entregado (Pendiente de Rendición)"),
+    ("POSPUESTO", "Pospuesto / No Entregado"),
+    ("COMPLETADO", "Completado y Cobrado"),
+    ("PENDIENTE_CAE", "Pendiente de CAE (ARCA)"),
+    ("COMPROBANTE_X", "Documento X (No Fiscal)"),
+    ("CANCELADO", "Cancelado"),
+)
 
     MOTIVOS_POSPUESTO = (
         ("AUSENTE", "Cliente No Se Encontraba en Domicilio"),
@@ -539,6 +542,26 @@ class Venta(models.Model):
         help_text='Turno donde se generó originalmente (por si fue heredado)'
     )
 
+    nombre_retiro = models.CharField(
+        "Nombre de quien retira / Identificador", 
+        max_length=100, 
+        blank=True, 
+        null=True,
+        help_text="Ej: Juan, Mesa 4, Pedido #001. Se imprime en la comanda de cocina."
+    )
+
+    comanda_entregada = models.BooleanField(
+    "Comanda Entregada / Retirada",
+    default=False,
+    help_text="Se marca cuando el despachador escanea el código de barras."
+    )
+
+    comanda_entregada_fecha = models.DateTimeField(
+        "Fecha/Hora de Entrega en Despacho",
+        null=True, blank=True,
+        help_text="Se completa cuando se escanea el código de barras al entregar."
+    )
+    
     class Meta:
         verbose_name = "Venta"
         verbose_name_plural = "Ventas"

@@ -5,6 +5,7 @@ from django.core.paginator import Paginator              # 🔽 AGREGAR ESTA
 from django.db import transaction
 from django.db.models import Count, Sum, Q
 from django.views.decorators.http import require_POST
+from .models import Impresora
 from .models import EmpresaConfig, Sucursal
 from .forms import EmpresaConfigForm
 from apps.productos.models import ListaPrecio
@@ -329,7 +330,27 @@ def modulos_negocio_view(request):
             config.modulo_cuenta_corriente = request.POST.get('modulo_cuenta_corriente') == 'on'
             config.modulo_multi_sucursal = request.POST.get('modulo_multi_sucursal') == 'on'
 
+            # 🔽 NUEVO: Módulo de Cocina y configuración de impresora
+            config.modulo_cocina = request.POST.get('modulo_cocina') == 'on'
+            config.impresora_cocina_ip = request.POST.get('impresora_cocina_ip', '').strip()
+            
+            puerto_str = request.POST.get('impresora_cocina_puerto', '9100').strip()
+            try:
+                config.impresora_cocina_puerto = int(puerto_str) if puerto_str else 9100
+            except ValueError:
+                config.impresora_cocina_puerto = 9100
+
+        # Guardar siempre la IP y el puerto (incluso si el modo es un preset)
+        if config.modulo_cocina:
+            config.impresora_cocina_ip = request.POST.get('impresora_cocina_ip', '').strip()
+            puerto_str = request.POST.get('impresora_cocina_puerto', '9100').strip()
+            try:
+                config.impresora_cocina_puerto = int(puerto_str) if puerto_str else 9100
+            except ValueError:
+                config.impresora_cocina_puerto = 9100
+
         config.save()
+        
         registrar_log(
             request,
             accion='MODULOS',
@@ -343,6 +364,7 @@ def modulos_negocio_view(request):
                 'reparto': config.modulo_reparto,
                 'cuenta_corriente': config.modulo_cuenta_corriente,
                 'multi_sucursal': config.modulo_multi_sucursal,
+                'cocina': config.modulo_cocina,  # 🔽 Agregado al log de auditoría
             },
         )
         messages.success(request, '✅ Configuración de módulos guardada.')
@@ -755,3 +777,137 @@ def auditoria_detalle_view(request, log_id):
     from .models import AuditLog
     log = get_object_or_404(AuditLog, id=log_id)
     return render(request, 'configuracion/auditoria_detalle.html', {'log': log})
+
+# =========================================================
+# GESTIÓN DE IMPRESORAS
+# =========================================================
+
+@login_required
+@user_passes_test(es_admin_o_super)
+def lista_impresoras_view(request):
+    """Lista todas las impresoras configuradas."""
+    impresoras = Impresora.objects.all()
+    return render(request, 'configuracion/lista_impresoras.html', {
+        'impresoras': impresoras,
+    })
+
+
+@login_required
+@user_passes_test(es_admin_o_super)
+def crear_impresora_view(request):
+    """Crea una nueva impresora."""
+    if request.method == 'POST':
+        nombre = request.POST.get('nombre', '').strip()
+        clave = request.POST.get('clave_estacion', '').strip()
+        activa = request.POST.get('activa') == 'on'
+        es_default = request.POST.get('es_por_defecto') == 'on'
+
+        errores = []
+        if not nombre:
+            errores.append('El nombre es obligatorio.')
+        if not clave:
+            errores.append('La clave de estación es obligatoria.')
+        elif Impresora.objects.filter(clave_estacion=clave).exists():
+            errores.append(f'Ya existe una impresora con la clave "{clave}".')
+
+        if errores:
+            for err in errores:
+                messages.error(request, err)
+            # 👇 devolvemos form_data para que el template repueble los campos
+            return render(request, 'configuracion/crear_impresora.html', {
+                'form_data': request.POST,
+            })
+
+        try:
+            impresora = Impresora.objects.create(
+                nombre=nombre,
+                clave_estacion=clave,
+                activa=activa,
+                es_por_defecto=es_default,
+            )
+            messages.success(request, f'Impresora "{nombre}" creada correctamente.')
+            return redirect('configuracion:lista_impresoras')
+        except Exception as e:
+            logger.exception(f"Error creando impresora: {e}")
+            messages.error(request, f'Error: {str(e)}')
+            # 👇 también acá, para no perder lo cargado
+            return render(request, 'configuracion/crear_impresora.html', {
+                'form_data': request.POST,
+            })
+
+    # 👇 GET: form_data vacío para que el template no explote
+    return render(request, 'configuracion/crear_impresora.html', {
+        'form_data': {},
+    })
+
+
+@login_required
+@user_passes_test(es_admin_o_super)
+def editar_impresora_view(request, impresora_id):
+    """Edita una impresora existente."""
+    impresora = get_object_or_404(Impresora, id=impresora_id)
+
+    if request.method == 'POST':
+        nombre = request.POST.get('nombre', '').strip()
+        clave = request.POST.get('clave_estacion', '').strip()
+        activa = request.POST.get('activa') == 'on'
+        es_default = request.POST.get('es_por_defecto') == 'on'
+
+        errores = []
+        if not nombre:
+            errores.append('El nombre es obligatorio.')
+        if not clave:
+            errores.append('La clave de estación es obligatoria.')
+        elif Impresora.objects.filter(clave_estacion=clave).exclude(pk=impresora.pk).exists():
+            errores.append(f'Ya existe otra impresora con la clave "{clave}".')
+
+        if errores:
+            for err in errores:
+                messages.error(request, err)
+            return render(request, 'configuracion/editar_impresora.html', {
+                'impresora': impresora,
+                'form_data': request.POST,   # 👈 por si el template lo usa
+            })
+
+        try:
+            impresora.nombre = nombre
+            impresora.clave_estacion = clave
+            impresora.activa = activa
+            impresora.es_por_defecto = es_default
+            impresora.save()
+            messages.success(request, f'Impresora "{nombre}" actualizada correctamente.')
+            return redirect('configuracion:lista_impresoras')
+        except Exception as e:
+            logger.exception(f"Error editando impresora: {e}")
+            messages.error(request, f'Error: {str(e)}')
+            return render(request, 'configuracion/editar_impresora.html', {
+                'impresora': impresora,
+                'form_data': request.POST,
+            })
+
+    return render(request, 'configuracion/editar_impresora.html', {
+        'impresora': impresora,
+        'form_data': {},   # 👈 GET también con dict vacío
+    })
+
+
+@login_required
+@user_passes_test(es_admin_o_super)
+@require_POST
+def eliminar_impresora_view(request, impresora_id):
+    """Elimina una impresora (soft delete o hard delete)."""
+    impresora = get_object_or_404(Impresora, id=impresora_id)
+
+    if impresora.es_por_defecto:
+        messages.error(request, 'No se puede eliminar la impresora por defecto. Cambiá el default primero.')
+        return redirect('configuracion:lista_impresoras')
+
+    try:
+        nombre = impresora.nombre
+        impresora.delete()
+        messages.success(request, f'Impresora "{nombre}" eliminada correctamente.')
+    except Exception as e:
+        logger.exception(f"Error eliminando impresora: {e}")
+        messages.error(request, f'Error: {str(e)}')
+
+    return redirect('configuracion:lista_impresoras')

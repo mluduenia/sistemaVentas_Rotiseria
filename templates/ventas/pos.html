@@ -101,6 +101,22 @@
                     </select>
                 </div>
 
+                <!-- DATOS PARA COCINA -->
+                {% if config.modulo_cocina %}
+                <div class="mb-3">
+                    <div class="p-3 border border-success border-2 rounded bg-success-subtle">
+                        <label for="nombre_retiro" class="form-label small fw-bold text-success mb-1">
+                            <i class="fas fa-utensils me-1"></i> Nombre de quien retira el pedido <span class="text-danger">*</span>
+                        </label>
+                        <input type="text" id="nombre_retiro" class="form-control form-control-lg text-uppercase fw-bold"
+                               placeholder="Ej: JUAN / MESA 4" autocomplete="off">
+                        <small class="text-muted d-block mt-1">
+                            <i class="fas fa-info-circle me-1"></i> Se imprimirá en la comanda de la cocina.
+                        </small>
+                    </div>
+                </div>
+                {% endif %}
+
                 <!-- TIPO DE ENTREGA -->
                 <div class="mb-3">
                     <label class="form-label small fw-semibold text-secondary mb-1">
@@ -198,9 +214,12 @@
                     <span id="total_display" class="fs-2 fw-bold text-success">$0.00</span>
                 </div>
 
-                <button type="button" id="btn_abrir_opciones_venta" class="btn btn-success btn-lg w-100 py-3 fw-bold shadow-sm">
-                    <i class="fas fa-check-circle me-2"></i> Procesar Operación
-                </button>
+                <!-- BOTÓN ÚNICO DE COBRAR -->
+                <div class="d-grid">
+                    <button type="button" id="btn_abrir_opciones_venta" class="btn btn-success btn-lg w-100 py-3 fw-bold shadow-sm">
+                        <i class="fas fa-cash-register me-2"></i> Procesar Operación
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -230,24 +249,37 @@
             <h5 class="mb-0 fw-bold"><i class="fas fa-file-invoice me-2"></i> Tipo de Emisión / Destino</h5>
         </div>
         <div class="card-body p-4">
-            <p class="text-muted small text-center mb-3">Selecciona el tipo de comprobante o la acción deseada para este pedido:</p>
-            <div class="d-grid gap-2">
-                <button type="button" class="btn btn-outline-info py-2 fw-semibold text-start px-3 btn-accion-venta" data-accion="PRESUPUESTO">
-                    <i class="fas fa-file-alt me-2"></i> 1. Generar Presupuesto (Letra R)
-                </button>
-                <button type="button" class="btn btn-warning py-2 fw-semibold text-start px-3 btn-accion-venta" data-accion="REMITO">
-                    <i class="fas fa-truck me-2"></i> 2. Remito de Reparto (Asignar a Calle)
-                </button>
-                <button type="button" class="btn btn-success py-2 fw-semibold text-start px-3 btn-accion-venta" data-accion="FACTURA">
-                    <i class="fas fa-receipt me-2"></i> 3. Facturar Directo en ARCA / AFIP
-                </button>
-                <button type="button" class="btn btn-secondary py-2 fw-semibold text-start px-3 btn-accion-venta" data-accion="ENVIAR">
-                    <i class="fas fa-envelope me-2"></i> 4. Solo Enviar Comprobante / Guardar
-                </button>
+            <p class="text-muted small text-center mb-3" id="texto_opciones_venta">Selecciona el tipo de comprobante o la acción deseada para este pedido:</p>
+            <div class="d-grid gap-2" id="contenedor_botones_venta">
+                
+                {% if config.modulo_cocina %}
+                    <!-- FLUJO TAKE AWAY / COCINA -->
+                    <button type="button" class="btn btn-warning py-2 fw-semibold text-start px-3" id="btn_accion_precuenta">
+                        <i class="fas fa-receipt me-2"></i> 1. Generar Precuenta (Cocina)
+                    </button>
+                    <button type="button" class="btn btn-success py-2 fw-semibold text-start px-3 btn-accion-venta" data-accion="FACTURA">
+                        <i class="fas fa-file-invoice-dollar me-2"></i> 2. Facturar Directo en ARCA / AFIP
+                    </button>
+                {% else %}
+                    <!-- FLUJO NORMAL / LOCAL -->
+                    <button type="button" class="btn btn-outline-info py-2 fw-semibold text-start px-3 btn-accion-venta" data-accion="PRESUPUESTO">
+                        <i class="fas fa-file-alt me-2"></i> 1. Generar Presupuesto (Letra R)
+                    </button>
+                    <button type="button" class="btn btn-warning py-2 fw-semibold text-start px-3 btn-accion-venta" data-accion="REMITO">
+                        <i class="fas fa-truck me-2"></i> 2. Remito de Reparto (Asignar a Calle)
+                    </button>
+                    <button type="button" class="btn btn-success py-2 fw-semibold text-start px-3 btn-accion-venta" data-accion="FACTURA">
+                        <i class="fas fa-receipt me-2"></i> 3. Facturar Directo en ARCA / AFIP
+                    </button>
+                    <button type="button" class="btn btn-secondary py-2 fw-semibold text-start px-3 btn-accion-venta" data-accion="ENVIAR">
+                        <i class="fas fa-envelope me-2"></i> 4. Solo Enviar Comprobante / Guardar
+                    </button>
+                {% endif %}
+
             </div>
         </div>
         <div class="card-footer bg-body-tertiary text-center py-2 border-0">
-            <button type="button" class="btn btn-sm btn-outline-secondary px-4 fw-bold" id="btn_cancelar_opciones">Cancelar</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary px-4 fw-bold" id="btn_cancelar_opciones">Cerrar</button>
         </div>
     </div>
 </div>
@@ -270,7 +302,6 @@
                     <i class="fas fa-file-invoice-dollar me-3 text-dark fa-lg"></i> Ver / Descargar Documento (A4 / Remito R)
                 </button>
 
-                <!-- Aviso si el servicio no está disponible -->
                 <div id="aviso_sin_servicio" class="alert alert-warning small mb-0 py-2 d-none">
                     <i class="fas fa-exclamation-triangle me-1"></i>
                     Servicio de impresión no disponible. Usá el botón "Ver / Descargar Documento".
@@ -291,7 +322,7 @@
         </div>
         <div class="card-footer bg-body-tertiary text-center py-3 border-0">
             <button type="button" class="btn btn-secondary px-5 fw-bold" id="btn_cerrar_modal">
-                Nueva Operación <i class="fas fa-arrow-right ms-1"></i>
+                Cerrar
             </button>
         </div>
     </div>
@@ -302,6 +333,7 @@ document.addEventListener('DOMContentLoaded', function () {
     let carrito = [];
     let ultimaVentaId = null;
     let html5QrcodeScanner = null;
+    let precuentaPendienteId = null;
 
     // Referencias
     const buscarInput = document.getElementById('buscar_input');
@@ -331,6 +363,8 @@ document.addEventListener('DOMContentLoaded', function () {
     const txtBtnImprimir = document.getElementById('txt_btn_imprimir');
     const avisoSinServicio = document.getElementById('aviso_sin_servicio');
 
+    const inputNombreRetiro = document.getElementById('nombre_retiro');
+
     // Toggle Local vs Envío
     const radiosEntrega = document.querySelectorAll('input[name="tipo_entrega"]');
     const bloqueEnvio = document.getElementById('bloque_envio');
@@ -352,6 +386,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Persistencia
     function guardarEstadoPOS() {
+        if (carrito.length === 0) {
+            localStorage.removeItem('pos_backup');
+            return;
+        }
         const tipoEntrega = document.querySelector('input[name="tipo_entrega"]:checked').value;
         const estado = {
             carrito: carrito,
@@ -363,6 +401,7 @@ document.addEventListener('DOMContentLoaded', function () {
             metodo_pago: document.getElementById('metodo_pago').value,
             tipo_comprobante: document.getElementById('tipo_comprobante').value,
             monto_recibido: montoRecibidoInput.value,
+            nombre_retiro: inputNombreRetiro ? inputNombreRetiro.value : '',
         };
         localStorage.setItem('pos_backup', JSON.stringify(estado));
     }
@@ -383,6 +422,9 @@ document.addEventListener('DOMContentLoaded', function () {
             if (data.monto_recibido) {
                 montoRecibidoInput.value = data.monto_recibido;
                 calcularVuelto();
+            }
+            if (data.nombre_retiro && inputNombreRetiro) {
+                inputNombreRetiro.value = data.nombre_retiro;
             }
             if (data.tipo_entrega === 'ENVIO') {
                 document.getElementById('tipo_envio').checked = true;
@@ -487,11 +529,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (data.length === 0) {
                     resultadosDiv.innerHTML = '<div class="list-group-item text-muted small p-2">Sin resultados.</div>';
                 } else {
-                                        data.forEach(prod => {
+                    data.forEach(prod => {
                         const item = document.createElement('a');
                         item.href = '#';
 
-                        // Determinar color del badge de stock local
                         let stockBadge = '';
                         if (prod.stock_actual > 0) {
                             stockBadge = `<span class="badge bg-success">Stock local: ${prod.stock_actual}</span>`;
@@ -499,7 +540,6 @@ document.addEventListener('DOMContentLoaded', function () {
                             stockBadge = `<span class="badge bg-danger">Sin stock local</span>`;
                         }
 
-                        // Armar el aviso de stock en otras sucursales
                         let stockOtrasHtml = '';
                         if (prod.tiene_stock_otras && prod.stock_actual === 0) {
                             const detalle = prod.stock_otras_sucursales
@@ -627,27 +667,264 @@ document.addEventListener('DOMContentLoaded', function () {
         renderizarCarrito();
     });
 
+    // ============================================================
+    // ABRIR MODAL DE OPCIONES
+    // ============================================================
     btnAbrirOpciones.addEventListener('click', function() {
+        if (precuentaPendienteId) {
+            overlayOpcionesVenta.style.display = 'flex';
+            return;
+        }
+
         if (carrito.length === 0) {
             alert('Por favor agrega al menos un producto al carrito antes de procesar.');
             return;
         }
+
+        {% if config.modulo_cocina %}
+        const nombreRetiro = inputNombreRetiro ? inputNombreRetiro.value.trim() : '';
+        if (!nombreRetiro) {
+            alert('⚠️ Por favor ingresá el nombre de quien retira el pedido (dato para la comanda de cocina).');
+            if (inputNombreRetiro) inputNombreRetiro.focus();
+            return;
+        }
+        {% endif %}
+
         overlayOpcionesVenta.style.display = 'flex';
     });
 
     btnCancelarOpciones.addEventListener('click', function() {
         overlayOpcionesVenta.style.display = 'none';
+        if (precuentaPendienteId) {
+            precuentaPendienteId = null;
+            carrito = [];
+            localStorage.removeItem('pos_backup');
+            renderizarCarrito();
+            if (inputNombreRetiro) inputNombreRetiro.value = '';
+        }
     });
 
+    // ============================================================
+    // MANEJO DE BOTONES DE ACCIÓN EN EL MODAL (VENTA DIRECTA)
+    // ============================================================
     document.querySelectorAll('.btn-accion-venta').forEach(btn => {
         btn.addEventListener('click', function() {
             const accionComprobante = this.dataset.accion;
             overlayOpcionesVenta.style.display = 'none';
-            procesarVenta(accionComprobante);
+            
+            if (precuentaPendienteId) {
+                if (accionComprobante === 'FACTURA') {
+                    cerrarPrecuenta(true);
+                } else {
+                    cerrarPrecuenta(false);
+                }
+            } else {
+                procesarVenta(accionComprobante);
+            }
         });
     });
 
-    // Procesar venta
+    // ============================================================
+    // GENERAR PRECUENTA (BOTÓN EN EL MODAL)
+    // ============================================================
+    {% if config.modulo_cocina %}
+    const btnAccionPrecuenta = document.getElementById('btn_accion_precuenta');
+    if (btnAccionPrecuenta) {
+        btnAccionPrecuenta.addEventListener('click', async function() {
+            if (carrito.length === 0) {
+                alert('Por favor agregá al menos un producto antes de generar la precuenta.');
+                return;
+            }
+            await generarPrecuenta();
+        });
+    }
+    {% endif %}
+
+    async function generarPrecuenta() {
+        const clienteId = document.getElementById('cliente_id').value;
+        const vendedorId = document.getElementById('vendedor_id').value;
+        const nombreRetiro = inputNombreRetiro ? inputNombreRetiro.value.trim() : '';
+        
+        const payload = {
+            cliente_id: clienteId ? parseInt(clienteId) : null,
+            vendedor_id: vendedorId ? parseInt(vendedorId) : null,
+            nombre_retiro: nombreRetiro,
+            items: carrito,
+        };
+        
+        try {
+            const resp = await fetch('{% url "ventas:generar_precuenta_ajax" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}'
+                },
+                body: JSON.stringify(payload)
+            });
+            
+            const data = await resp.json();
+            
+            if (data.status === 'error') {
+                alert('❌ ' + data.message);
+                return;
+            }
+            
+            precuentaPendienteId = data.precuenta_id;
+            
+            // Impresión silenciosa de precuenta
+            const respTicket = await fetch(`/ventas/ticket-texto/${data.precuenta_id}/?tipo=precuenta`);
+            const ticketData = await respTicket.json();
+            
+            if (ticketData.success) {
+                await fetch('http://127.0.0.1:8085/print', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        contenido: ticketData.ticket_texto,
+                        tipo: 'ticket',
+                        cortar: true,
+                        modo: 'texto',
+                    }),
+                });
+            }
+
+            // Modificar el modal para dar opciones de cobro
+            const divBotones = document.getElementById('contenedor_botones_venta');
+            divBotones.innerHTML = `
+                <div class="alert alert-success text-center mb-3">
+                    <strong>Precuenta #${data.precuenta_id} generada</strong><br>
+                    Total: $${data.total.toFixed(2)}<br>
+                    <small>Comanda enviada a cocina.</small>
+                </div>
+                <button type="button" class="btn btn-success py-2 fw-semibold text-start px-3 mb-2" id="btn_facturar_precuenta">
+                    <i class="fas fa-file-invoice-dollar me-2"></i> Cobrar y Facturar (Fiscal)
+                </button>
+                <button type="button" class="btn btn-secondary py-2 fw-semibold text-start px-3" id="btn_cerrar_ticket_control">
+                    <i class="fas fa-times me-2"></i> Solo Cerrar (Sin Factura)
+                </button>
+            `;
+            document.getElementById('texto_opciones_venta').innerText = "¿Desea facturar el pedido o solo cerrarlo?";
+            
+            // Asignar los eventos a los nuevos botones
+            document.getElementById('btn_facturar_precuenta').addEventListener('click', function() {
+                cerrarPrecuenta(true);
+            });
+            document.getElementById('btn_cerrar_ticket_control').addEventListener('click', function() {
+                cerrarPrecuenta(false);
+            });
+            
+            montoRecibidoInput.value = data.total.toFixed(2);
+            calcularVuelto();
+            
+        } catch (err) {
+            console.error('Error:', err);
+            alert('Error de conexión al generar la precuenta.');
+        }
+    }
+
+    // ============================================================
+    // CERRAR PRECUENTA (EMISIÓN FISCAL O CIERRE INTERNO)
+    // ============================================================
+    async function cerrarPrecuenta(conFactura) {
+        if (!precuentaPendienteId) return;
+        
+        const metodoPago = document.getElementById('metodo_pago').value;
+        const montoRecibido = parseFloat(montoRecibidoInput.value) || 0;
+        const tipoComprobante = parseInt(document.getElementById('tipo_comprobante').value);
+        
+        // Deshabilitamos botones visualmente
+        const divBotones = document.getElementById('contenedor_botones_venta');
+        const botonesOriginales = divBotones.innerHTML;
+        divBotones.innerHTML = '<div class="text-center py-3"><i class="fas fa-spinner fa-spin fa-2x text-primary"></i><p class="mt-2">Procesando...</p></div>';
+
+        try {
+            const resp = await fetch(`/ventas/precuenta/cerrar/${precuentaPendienteId}/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}'
+                },
+                body: JSON.stringify({
+                    con_factura: conFactura,
+                    metodo_pago: metodoPago,
+                    monto_recibido: montoRecibido,
+                    tipo_comprobante: tipoComprobante,
+                })
+            });
+            
+            if (!resp.ok) {
+                throw new Error(`El servidor respondió con error ${resp.status}. Revisá la consola de Django.`);
+            }
+
+            const data = await resp.json();
+            
+            if (data.status === 'error') {
+                throw new Error(data.message);
+            }
+            
+            // LIMPIEZA TOTAL
+            precuentaPendienteId = null;
+            carrito = [];
+            localStorage.removeItem('pos_backup');
+            renderizarCarrito();
+            if (inputNombreRetiro) inputNombreRetiro.value = '';
+            
+            overlayOpcionesVenta.style.display = 'none';
+            
+            ultimaVentaId = data.venta_id;
+            
+            // ============================================================
+            // IMPRESIÓN AUTOMÁTICA (SOLO SI SE FACTURÓ)
+            // ============================================================
+            if (conFactura) {
+                try {
+                    const respTicket = await fetch(`/ventas/ticket-texto/${data.venta_id}/`);
+                    const ticketData = await respTicket.json();
+                    
+                    if (ticketData.success) {
+                        await fetch('http://127.0.0.1:8085/print', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                contenido: ticketData.ticket_texto,
+                                tipo: 'ticket',
+                                cortar: true,
+                                modo: 'texto',
+                            }),
+                        });
+                    }
+                } catch (printErr) {
+                    console.error('Error al imprimir automáticamente:', printErr);
+                }
+            }
+            
+            // ============================================================
+            // MODAL POST-VENTA (CONFIRMACIÓN)
+            // ============================================================
+            modalVentaId.textContent = '#' + data.venta_id;
+            modalEstadoDisplay.textContent = `Estado: ${data.estado_display}`;
+            
+            const headerModal = overlayPostVenta.querySelector('.card-header');
+            if (data.cae) {
+                headerModal.className = 'card-header bg-success text-white py-3 text-center border-0';
+                headerModal.innerHTML = '<h4 class="mb-0 fw-bold"><i class="fas fa-check-circle me-2"></i> ¡Factura Emitida!</h4>';
+            } else {
+                headerModal.className = 'card-header bg-warning text-dark py-3 text-center border-0';
+                headerModal.innerHTML = '<h4 class="mb-0 fw-bold"><i class="fas fa-receipt me-2"></i> Ticket No Fiscal / Control</h4>';
+            }
+            
+            overlayPostVenta.style.display = 'flex';
+            
+        } catch (err) {
+            console.error('Error:', err);
+            alert('❌ Error al cerrar la precuenta:\n\n' + err.message);
+            divBotones.innerHTML = botonesOriginales;
+        }
+    }
+
+    // ============================================================
+    // PROCESAR VENTA (FLUJO NORMAL SIN PRECUENTA)
+    // ============================================================
     function procesarVenta(accionComprobante) {
         const tipoEntrega = document.querySelector('input[name="tipo_entrega"]:checked').value;
         const clienteId = document.getElementById('cliente_id').value;
@@ -657,6 +934,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const metodoPago = document.getElementById('metodo_pago').value;
         const tipoComprobante = parseInt(document.getElementById('tipo_comprobante').value);
         const montoRecibido = parseFloat(montoRecibidoInput.value) || 0;
+        const nombreRetiro = inputNombreRetiro ? inputNombreRetiro.value.trim() : '';
 
         if (tipoEntrega === 'ENVIO') {
             if (!repartidorId) {
@@ -685,6 +963,7 @@ document.addEventListener('DOMContentLoaded', function () {
             tipo_comprobante: tipoComprobante,
             monto_recibido: montoRecibido,
             accion_comprobante: accionComprobante,
+            nombre_retiro: nombreRetiro,
             items: carrito
         };
 
@@ -700,19 +979,16 @@ document.addEventListener('DOMContentLoaded', function () {
             },
             body: JSON.stringify(payload)
         })
-                .then(res => res.json())
+        .then(res => res.json())
         .then(data => {
             btnAbrirOpciones.disabled = false;
             btnAbrirOpciones.innerHTML = '<i class="fas fa-check-circle me-2"></i> Procesar Operación';
 
-            // 1. Errores reales (validaciones, falta de stock, etc.) -> Cortar flujo
             if (data.status === 'error') {
                 alert('❌ ' + (data.message || 'Ocurrió un problema en el servidor.'));
                 return;
             }
 
-            // 2. Si es WARNING (ARCA rechazó el CAE pero la venta se guardó)
-            // Mostramos el cartel avisando, pero NO cortamos el flujo.
             if (data.status === 'warning' || data.error_arca) {
                 alert(
                     '⚠️ LA VENTA SE GUARDÓ, PERO ARCA RECHAZÓ EL CAE\n\n' +
@@ -721,7 +997,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 );
             }
 
-            // 3. Flujo exitoso o warning -> Abrir modal y limpiar carrito
             if (data.status === 'success' || data.status === 'warning') {
                 localStorage.removeItem('pos_backup');
                 carrito = [];
@@ -734,12 +1009,13 @@ document.addEventListener('DOMContentLoaded', function () {
                 montoRecibidoInput.value = '0.00';
                 vueltoDisplay.textContent = '$0.00';
 
+                if (inputNombreRetiro) inputNombreRetiro.value = '';
+
                 ultimaVentaId = data.venta_id;
                 modalVentaId.textContent = '#' + ultimaVentaId;
                 modalEstadoDisplay.textContent = `Estado: ${data.estado_display}` + (data.repartidor ? ` | Repartidor: ${data.repartidor}` : '');
                 emailInput.value = data.cliente_email || '';
 
-                // 🔽 CAMBIAR EL COLOR DEL MODAL SEGÚN SI HAY CAE O NO
                 const headerModal = overlayPostVenta.querySelector('.card-header');
                 if (data.cae) {
                     headerModal.className = 'card-header bg-success text-white py-3 text-center border-0';
@@ -749,7 +1025,6 @@ document.addEventListener('DOMContentLoaded', function () {
                     headerModal.innerHTML = '<h4 class="mb-0 fw-bold"><i class="fas fa-exclamation-triangle me-2"></i> Comprobante NO FISCAL (Sin CAE)</h4>';
                 }
 
-                // Detectar servicio de impresión
                 detectarServicioImpresion().then(disponible => {
                     if (disponible) {
                         avisoSinServicio.classList.add('d-none');
@@ -764,7 +1039,6 @@ document.addEventListener('DOMContentLoaded', function () {
                     }
                 });
 
-                // Mostrar el modal de post-venta
                 overlayPostVenta.style.display = 'flex';
             }
         })
@@ -862,8 +1136,15 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
+    // Cerrar Modal Post-Venta y limpiar todo
     document.getElementById('btn_cerrar_modal').addEventListener('click', function() {
         overlayPostVenta.style.display = 'none';
+        carrito = [];
+        localStorage.removeItem('pos_backup');
+        renderizarCarrito();
+        document.getElementById('monto_recibido').value = '0.00';
+        document.getElementById('vuelto_display').textContent = '$0.00';
+        if (inputNombreRetiro) inputNombreRetiro.value = '';
         buscarInput.focus();
     });
 });
